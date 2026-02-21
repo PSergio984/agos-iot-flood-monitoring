@@ -1,0 +1,5 @@
+cloudinary==1.41.0
+picamera2==0.3.19
+RPi.GPIO==0.7.1
+python-dotenv==1.0.1
+requests==2.31.0
