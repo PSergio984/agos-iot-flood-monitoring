@@ -1,12 +1,14 @@
 from camera import capture_image
 from sensor import get_water_level
 from uploader import upload_image
+from config import SENSOR_DEVICE_ID
 import requests
 import time
 import os
 import logging
 import signal
 import sys
+from datetime import datetime, timezone
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,13 +42,19 @@ while not shutdown_requested:
         
         # Post data to server with timeout and error handling
         try:
+            payload = {
+                "sensor_device_id": SENSOR_DEVICE_ID,
+                "raw_distance_cm": level,
+                "signal_strength": 100,
+                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
             response = requests.post(
-                SERVER_URL, 
-                json={"image_url": url, "water_level": level},
+                SERVER_URL,
+                json=payload,
                 timeout=5
             )
             response.raise_for_status()
-            logger.info(f"Posted data: url={url}, level={level}")
+            logger.info(f"Posted data: device={SENSOR_DEVICE_ID}, distance={level}cm, url={url}")
         except requests.exceptions.Timeout:
             logger.error(f"Timeout posting to {SERVER_URL}")
         except requests.exceptions.RequestException as e:
