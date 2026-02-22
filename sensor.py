@@ -16,7 +16,7 @@ try:
         print("[GPIO] RPi.GPIO module loaded successfully")
     else:
         print("[GPIO] MOCK_MODE enabled - running in MOCK mode")
-except (ImportError, ModuleNotFoundError):
+except (ImportError, ModuleNotFoundError, RuntimeError) as e:
     MOCK = True
     print("[GPIO] RPi.GPIO not available - running in MOCK mode")
 
