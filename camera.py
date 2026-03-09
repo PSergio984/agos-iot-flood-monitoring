@@ -3,6 +3,11 @@ import os
 import subprocess
 import tempfile
 
+# Resolution for the real camera — OV5647 supports 1920×1080 @ 30fps or 2592×1944 @ 15fps
+# Override with env vars CAMERA_WIDTH / CAMERA_HEIGHT if needed.
+CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1920"))
+CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "1080"))
+
 # Check if we're explicitly in mock mode or if picamera2 is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
 USE_FSWEBCAM = os.getenv("USE_FSWEBCAM", "false").lower() == "true"  # For VM testing
@@ -87,9 +92,17 @@ def capture_image(path=None):
     cam = None
     try:
         cam = Picamera2()
+        # Configure for high-quality stills at target resolution.
+        # create_still_configuration() overrides the default 640×480 preview mode.
+        config = cam.create_still_configuration(
+            main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
+            buffer_count=1
+        )
+        cam.configure(config)
         cam.start()
-        time.sleep(2)
+        time.sleep(2)  # Allow AEC/AWB to converge before capture
         cam.capture_file(path)
+        print(f"[CAMERA] Captured {CAMERA_WIDTH}×{CAMERA_HEIGHT} image: {path}")
         return path
     finally:
         if cam is not None:

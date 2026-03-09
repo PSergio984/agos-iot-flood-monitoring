@@ -22,7 +22,8 @@ except (ImportError, ModuleNotFoundError, RuntimeError) as e:
 
 TRIG = 23
 ECHO = 24
-TIMEOUT = 0.1  # 100ms timeout to prevent hangs
+TIMEOUT = 0.3  # 300ms timeout (covers up to ~4m range + margins)
+MAX_RETRIES = 3  # Retry count before giving up
 
 # Initialize GPIO once at module level (only if not in mock mode)
 gpio_initialized = False
@@ -56,40 +57,62 @@ def get_water_level():
     
     # Real hardware implementation
     import RPi.GPIO as GPIO
-    try:
-        # Ensure trigger is low
-        GPIO.output(TRIG, False)
-        time.sleep(0.01)  # 10ms settle time
-        
-        # Send 10µs trigger pulse
-        GPIO.output(TRIG, True)
-        time.sleep(0.00001)  # 10 microseconds
-        GPIO.output(TRIG, False)
-        
-        # Wait for echo to go HIGH (with timeout)
-        timeout_start = time.monotonic()
-        pulse_start = time.monotonic()  # Initialize before loop
-        while GPIO.input(ECHO) == 0:
-            pulse_start = time.monotonic()
-            if pulse_start - timeout_start > TIMEOUT:
-                raise TimeoutError("Timeout waiting for echo to go HIGH")
-        
-        # Wait for echo to go LOW (with timeout)
-        timeout_start = time.monotonic()
-        pulse_end = time.monotonic()  # Initialize before loop
-        while GPIO.input(ECHO) == 1:
-            pulse_end = time.monotonic()
-            if pulse_end - timeout_start > TIMEOUT:
-                raise TimeoutError("Timeout waiting for echo to go LOW")
-        
-        # Calculate distance
-        time_elapsed = pulse_end - pulse_start
-        # Speed of sound = 34300 cm/s, divide by 2 for round trip
-        distance_cm = (time_elapsed * 34300) / 2
-        
-        return distance_cm
-        
-    except (TimeoutError, Exception) as e:
-        # Log error and return None on failure
-        print(f"Error reading sensor: {e}")
-        return None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            # Ensure trigger is low; HC-SR04 needs ~60ms minimum cycle time
+            GPIO.output(TRIG, False)
+            time.sleep(0.06)  # 60ms settle (full HC-SR04 cycle time)
+
+            # Warn if ECHO is already HIGH — indicates VCC/wiring problem
+            # HC-SR04 requires 5V on VCC; ECHO outputs 5V so use a voltage divider
+            # (1kΩ from ECHO→GPIO and 2kΩ from GPIO→GND) to protect the Pi.
+            if GPIO.input(ECHO) == 1:
+                print(f"[SENSOR] Warning (attempt {attempt}): ECHO is HIGH before trigger. "
+                      "Check wiring — VCC must be 5V; ECHO needs a 1kΩ/2kΩ voltage divider.")
+
+            # Send 10µs trigger pulse
+            GPIO.output(TRIG, True)
+            time.sleep(0.00001)  # 10 microseconds
+            GPIO.output(TRIG, False)
+
+            # Wait for ECHO to go HIGH (pulse start)
+            timeout_start = time.monotonic()
+            while GPIO.input(ECHO) == 0:
+                if time.monotonic() - timeout_start > TIMEOUT:
+                    raise TimeoutError(
+                        f"Timeout waiting for echo HIGH (attempt {attempt}/{MAX_RETRIES}). "
+                        "Check: HC-SR04 VCC=5V, TRIG→GPIO23, ECHO→GPIO24 w/ voltage divider."
+                    )
+            pulse_start = time.monotonic()  # Captured after ECHO went HIGH
+
+            # Wait for ECHO to go LOW (pulse end)
+            timeout_start = time.monotonic()
+            while GPIO.input(ECHO) == 1:
+                if time.monotonic() - timeout_start > TIMEOUT:
+                    raise TimeoutError(
+                        f"Timeout waiting for echo LOW (attempt {attempt}/{MAX_RETRIES})."
+                    )
+            pulse_end = time.monotonic()  # Captured after ECHO went LOW
+
+            # Speed of sound ≈ 34300 cm/s, divide by 2 for round trip
+            distance_cm = ((pulse_end - pulse_start) * 34300) / 2
+
+            # Sanity check: HC-SR04 valid range is 2 cm – 400 cm
+            if not (2.0 <= distance_cm <= 400.0):
+                print(f"[SENSOR] Out-of-range reading {distance_cm:.1f} cm on attempt {attempt}, retrying...")
+                continue
+
+            return round(distance_cm, 2)
+
+        except TimeoutError as e:
+            print(f"Error reading sensor: {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(0.1)
+        except Exception as e:
+            print(f"Error reading sensor (attempt {attempt}): {e}")
+            if attempt < MAX_RETRIES:
+                time.sleep(0.1)
+
+    print(f"[SENSOR] All {MAX_RETRIES} attempts failed. Returning None.")
+    return None
