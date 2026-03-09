@@ -46,7 +46,7 @@ def _init_gpio():
 _init_gpio()
 
 def get_water_level():
-    """Read water level from HC-SR04 ultrasonic sensor."""
+    """Read water level from JSN-SR04 ultrasonic sensor."""
     if MOCK or not GPIO_AVAILABLE:
         # Generate realistic mock water level data (9.5-20.5 cm range)
         base_level = 12.5
@@ -60,16 +60,17 @@ def get_water_level():
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            # Ensure trigger is low; HC-SR04 needs ~60ms minimum cycle time
+            # Ensure trigger is low; JSN-SR04 needs ~60ms minimum cycle time
             GPIO.output(TRIG, False)
-            time.sleep(0.06)  # 60ms settle (full HC-SR04 cycle time)
-
-            # Warn if ECHO is already HIGH — indicates VCC/wiring problem
-            # HC-SR04 requires 5V on VCC; ECHO outputs 5V so use a voltage divider
-            # (1kΩ from ECHO→GPIO and 2kΩ from GPIO→GND) to protect the Pi.
+            time.sleep(0.06)  # 60ms settle (full JSN-SR04 cycle time)
+            # Warn if ECHO is already HIGH — indicates a wiring or power problem.
+            # JSN-SR04 wiring notes:
+            #   3.3V mode: VCC→3.3V pin — ECHO outputs 3.3V, Pi-safe, no voltage divider needed.
+            #   5V mode  : VCC→5V pin  — ECHO outputs 5V; add a 1kΩ/2kΩ divider to protect GPIO.
             if GPIO.input(ECHO) == 1:
                 print(f"[SENSOR] Warning (attempt {attempt}): ECHO is HIGH before trigger. "
-                      "Check wiring — VCC must be 5V; ECHO needs a 1kΩ/2kΩ voltage divider.")
+                      "Check wiring — if VCC is 5V, ECHO needs a 1kΩ/2kΩ voltage divider; "
+                      "use 3.3V on VCC to avoid this.")
 
             # Send 10µs trigger pulse
             GPIO.output(TRIG, True)
@@ -82,7 +83,7 @@ def get_water_level():
                 if time.monotonic() - timeout_start > TIMEOUT:
                     raise TimeoutError(
                         f"Timeout waiting for echo HIGH (attempt {attempt}/{MAX_RETRIES}). "
-                        "Check: HC-SR04 VCC=5V, TRIG→GPIO23, ECHO→GPIO24 w/ voltage divider."
+                        "Check: TRIG→GPIO23, ECHO→GPIO24, VCC→3.3V (or 5V w/ voltage divider)."
                     )
             pulse_start = time.monotonic()  # Captured after ECHO went HIGH
 
@@ -98,8 +99,8 @@ def get_water_level():
             # Speed of sound ≈ 34300 cm/s, divide by 2 for round trip
             distance_cm = ((pulse_end - pulse_start) * 34300) / 2
 
-            # Sanity check: HC-SR04 valid range is 2 cm – 400 cm
-            if not (2.0 <= distance_cm <= 400.0):
+            # Sanity check: JSN-SR04 valid range is 20 cm – 600 cm
+            if not (20.0 <= distance_cm <= 600.0):
                 print(f"[SENSOR] Out-of-range reading {distance_cm:.1f} cm on attempt {attempt}, retrying...")
                 continue
 

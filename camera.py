@@ -114,3 +114,74 @@ def capture_image(path=None):
                 cam.close()
             except Exception:
                 pass  # Best effort cleanup
+
+
+class PersistentCamera:
+    """Keep picamera2 open across rapid successive captures.
+
+    Opens and configures the camera once (paying the 2-second AEC/AWB
+    warm-up only at startup), then captures frames on demand with no
+    per-frame initialisation overhead.  Use as a context manager::
+
+        with PersistentCamera() as cam:
+            path = cam.capture()   # fast — no sleep
+
+    Falls back to the module-level mock path when MOCK_MODE is active.
+    """
+
+    def __init__(self):
+        self._cam = None
+
+    def start(self):
+        """Open and configure the camera; blocks until AEC/AWB converges."""
+        if MOCK or not PICAMERA_AVAILABLE:
+            print("[CAMERA] PersistentCamera: running in MOCK mode")
+            return
+        if self._cam is not None:
+            self.stop()  # Close existing camera before re-opening
+        from picamera2 import Picamera2
+        import time
+        self._cam = Picamera2()
+        config = self._cam.create_still_configuration(
+            main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
+            buffer_count=1,
+        )
+        self._cam.configure(config)
+        self._cam.start()
+        time.sleep(2)  # AEC/AWB convergence — paid once, not per frame
+        print(f"[CAMERA] PersistentCamera ready ({CAMERA_WIDTH}×{CAMERA_HEIGHT})")
+    def capture(self, path=None):
+        """Capture a single frame with no startup delay.
+
+        A timestamped filename is generated automatically when *path* is
+        omitted, avoiding collisions when called at high frame rates.
+        """
+        if path is None:
+            import datetime
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            path = os.path.join(tempfile.gettempdir(), f"frame_{ts}.jpg")
+        if MOCK or not PICAMERA_AVAILABLE or self._cam is None:
+            return capture_image(path)  # use mock path
+        self._cam.capture_file(path)
+        return path
+
+    def stop(self):
+        """Stop and close the camera."""
+        if self._cam is not None:
+            try:
+                self._cam.stop()
+            except Exception:
+                pass
+            try:
+                self._cam.close()
+            except Exception:
+                pass
+            self._cam = None
+            print("[CAMERA] PersistentCamera stopped")
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *_):
+        self.stop()
