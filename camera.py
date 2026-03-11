@@ -2,12 +2,16 @@
 import os
 import subprocess
 import tempfile
+import datetime
 
 CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
 CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
 CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "false").lower() == "true"
 CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
 CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
+
+
+IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
 
 # Check if we're explicitly in mock mode or if picamera2 is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
@@ -38,6 +42,32 @@ except (ImportError, ModuleNotFoundError):
 except Exception as e:
     MOCK = True
     print(f"[CAMERA] Camera initialisation failed ({e}) — running in MOCK mode")
+
+# ── IR-CUT filter helpers ────────────────────────────────────────────────────
+
+def _is_daytime() -> bool:
+    """Simple time-based heuristic: daytime = 06:00–18:00 local time."""
+    return 6 <= datetime.datetime.now().hour < 18
+
+
+def set_ir_cut_mode(day: bool) -> None:
+
+    if IR_CUT_PIN < 0 or MOCK or not PICAMERA_AVAILABLE:
+        return
+    try:
+        import RPi.GPIO as GPIO
+        # GPIO.setmode() and cleanup are owned by sensor.py.
+        # Only set BCM mode here if no mode has been set yet (e.g. during
+        # tests or if camera.py is imported before sensor.py).
+        if GPIO.getmode() is None:
+            GPIO.setmode(GPIO.BCM)
+        GPIO.setup(IR_CUT_PIN, GPIO.OUT)
+        GPIO.output(IR_CUT_PIN, GPIO.HIGH if day else GPIO.LOW)
+        label = "DAY (colour, IR filter in)" if day else "NIGHT (IR vision, LEDs auto)"
+        print(f"[CAMERA] IR-CUT → {label}")
+    except Exception as e:
+        print(f"[CAMERA] IR-CUT GPIO error: {e}")
+
 
 def capture_image(path=None):
     # Use cross-platform temporary directory if path not specified
@@ -102,6 +132,7 @@ def capture_image(path=None):
     import time
     cam = None
     try:
+        set_ir_cut_mode(day=_is_daytime())
         cam = Picamera2()
         # Configure for high-quality stills at target resolution.
         # create_still_configuration() overrides the default 640×480 preview mode.
@@ -157,6 +188,7 @@ class PersistentCamera:
         if self._cam is not None:
             self.stop()  # Close existing camera before re-opening
         import time
+        set_ir_cut_mode(day=_is_daytime())
         self._cam = Picamera2()
         # ScalerCrop baked into config so AEC/AWB converges on the correct
         # sensor region from the very first frame.
