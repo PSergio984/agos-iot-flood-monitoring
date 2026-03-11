@@ -3,10 +3,11 @@ import os
 import subprocess
 import tempfile
 
-# Resolution for the real camera — OV5647 supports 1920×1080 @ 30fps or 2592×1944 @ 15fps
-# Override with env vars CAMERA_WIDTH / CAMERA_HEIGHT if needed.
-CAMERA_WIDTH = int(os.getenv("CAMERA_WIDTH", "1920"))
-CAMERA_HEIGHT = int(os.getenv("CAMERA_HEIGHT", "1080"))
+CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
+CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
+CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "false").lower() == "true"
+CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
+CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
 
 # Check if we're explicitly in mock mode or if picamera2 is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
@@ -19,13 +20,24 @@ PICAMERA_AVAILABLE = False
 try:
     if not MOCK:
         from picamera2 import Picamera2
-        PICAMERA_AVAILABLE = True
-        print("[CAMERA] picamera2 module loaded successfully")
+        # Verify at least one camera is physically detected by libcamera.
+        # global_camera_info() returns [] when no hardware is connected,
+        # which would cause IndexError inside Picamera2.__init__().
+        _detected = Picamera2.global_camera_info()
+        if _detected:
+            PICAMERA_AVAILABLE = True
+            print("[CAMERA] picamera2 module loaded successfully")
+        else:
+            MOCK = True
+            print("[CAMERA] No cameras detected by libcamera — running in MOCK mode")
     else:
         print("[CAMERA] MOCK_MODE enabled - running in MOCK mode")
 except (ImportError, ModuleNotFoundError):
     MOCK = True
     print("[CAMERA] picamera2 not available - running in MOCK mode")
+except Exception as e:
+    MOCK = True
+    print(f"[CAMERA] Camera initialisation failed ({e}) — running in MOCK mode")
 
 def capture_image(path=None):
     # Use cross-platform temporary directory if path not specified
@@ -87,20 +99,25 @@ def capture_image(path=None):
             print(f"[MOCK] Created minimal test image: {path}")
             return path
     
-    from picamera2 import Picamera2
     import time
     cam = None
     try:
         cam = Picamera2()
         # Configure for high-quality stills at target resolution.
         # create_still_configuration() overrides the default 640×480 preview mode.
+        # ScalerCrop is baked into the config so AEC/AWB converges on the
+        # correct sensor region from the very first frame.
+        controls = {}
+        if CAMERA_NO_CROP:
+            controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
         config = cam.create_still_configuration(
             main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
-            buffer_count=1
+            controls=controls,
+            buffer_count=1,
         )
         cam.configure(config)
         cam.start()
-        time.sleep(2)  # Allow AEC/AWB to converge before capture
+        time.sleep(2)  # Allow AEC/AWB to converge on the correct crop region
         cam.capture_file(path)
         print(f"[CAMERA] Captured {CAMERA_WIDTH}×{CAMERA_HEIGHT} image: {path}")
         return path
@@ -139,17 +156,23 @@ class PersistentCamera:
             return
         if self._cam is not None:
             self.stop()  # Close existing camera before re-opening
-        from picamera2 import Picamera2
         import time
         self._cam = Picamera2()
+        # ScalerCrop baked into config so AEC/AWB converges on the correct
+        # sensor region from the very first frame.
+        controls = {}
+        if CAMERA_NO_CROP:
+            controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
         config = self._cam.create_still_configuration(
             main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
+            controls=controls,
             buffer_count=1,
         )
         self._cam.configure(config)
         self._cam.start()
-        time.sleep(2)  # AEC/AWB convergence — paid once, not per frame
-        print(f"[CAMERA] PersistentCamera ready ({CAMERA_WIDTH}×{CAMERA_HEIGHT})")
+        time.sleep(2)  # AEC/AWB convergence on correct crop — paid once, not per frame
+        print(f"[CAMERA] PersistentCamera ready ({CAMERA_WIDTH}×{CAMERA_HEIGHT}{'  full-sensor' if CAMERA_NO_CROP else ''})")
+
     def capture(self, path=None):
         """Capture a single frame with no startup delay.
 
