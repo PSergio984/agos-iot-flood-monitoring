@@ -1,7 +1,7 @@
 from camera import capture_image, PersistentCamera
 from sensor import get_water_level
 from uploader import upload_image
-from config import SENSOR_DEVICE_ID, SENSOR_INTERVAL, CAMERA_INTERVAL
+from config import SENSOR_DEVICE_ID, SENSOR_INTERVAL, CAMERA_INTERVAL, IOT_API_KEY
 import requests
 import time
 import os
@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Server configuration
-SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:5000/data")
+SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
 WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
 
 
@@ -115,13 +115,19 @@ def sensor_loop():
                 logger.warning("Failed to read water level, skipping")
             else:
                 try:
+                    headers = {}
+                    if IOT_API_KEY:
+                        headers["x-api-key"] = IOT_API_KEY
+                    else:
+                        logger.warning("[SENSOR] IOT_API_KEY is not set; request may be rejected with 401")
+
                     payload = {
                         "sensor_device_id": SENSOR_DEVICE_ID,
                         "raw_distance_cm": level,
                         "signal_strength": 100,
                         "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     }
-                    response = requests.post(SERVER_URL, json=payload, timeout=5)
+                    response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
                     response.raise_for_status()
                     logger.info(f"Sensor: distance={level}cm device={SENSOR_DEVICE_ID}")
                 except requests.exceptions.Timeout:

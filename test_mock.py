@@ -91,8 +91,14 @@ def test_backend_connection():
     """Test backend server connectivity"""
     print("\n🔍 Testing Backend Connection...")
     
-    server_url = os.getenv("SERVER_URL", "http://localhost:5000/data")
+    server_url = os.getenv("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
+    iot_api_key = os.getenv("IOT_API_KEY", "")
     print(f"   Target: {server_url}")
+
+    # Keep behavior aligned with required_env_vars: API key is mandatory for backend auth.
+    if not iot_api_key:
+        print("❌ Missing IOT_API_KEY: backend sensor endpoint requires x-api-key")
+        return False
     
     if "localhost" in server_url or "127.0.0.1" in server_url:
         print("⚠️  Backend is set to localhost - make sure server is running")
@@ -101,13 +107,23 @@ def test_backend_connection():
     
     try:
         import requests
+
+        try:
+            sensor_device_id = int(os.getenv("SENSOR_DEVICE_ID", "1"))
+        except (TypeError, ValueError):
+            print("⚠️  Invalid SENSOR_DEVICE_ID in environment, defaulting to 1")
+            sensor_device_id = 1
         
         payload = {
-            "image_url": "https://res.cloudinary.com/test/image.jpg",
-            "water_level": 12.5
+            "sensor_device_id": sensor_device_id,
+            "raw_distance_cm": 12.5,
+            "signal_strength": -65,
+            "timestamp": "2026-03-13T01:36:39Z"
         }
-        
-        response = requests.post(server_url, json=payload, timeout=5)
+
+        headers = {"x-api-key": iot_api_key}
+
+        response = requests.post(server_url, json=payload, headers=headers, timeout=5)
         
         if response.status_code < 500:
             print(f"✅ Backend connection test passed: HTTP {response.status_code}")
@@ -130,15 +146,16 @@ def test_environment():
     """Test environment configuration"""
     print("\n🔍 Testing Environment Configuration...")
     
-    required = [
+    required_env_vars = [
         "CLOUDINARY_CLOUD_NAME",
         "CLOUDINARY_API_KEY", 
         "CLOUDINARY_API_SECRET",
-        "SERVER_URL"
+        "SERVER_URL",
+        "IOT_API_KEY"
     ]
     
     missing = []
-    for var in required:
+    for var in required_env_vars:
         value = os.getenv(var)
         if not value or "your_" in value or "here" in value:
             missing.append(var)

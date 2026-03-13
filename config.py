@@ -7,6 +7,7 @@ API_KEY = os.getenv("CLOUDINARY_API_KEY")
 API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 CLOUDINARY_URL = os.getenv("CLOUDINARY_URL")
 SERVER_URL = os.getenv("SERVER_URL")
+IOT_API_KEY = os.getenv("IOT_API_KEY", "")
 SENSOR_DEVICE_ID = int(os.getenv("SENSOR_DEVICE_ID", "1"))
 
 # ── Timing / throughput ──────────────────────────────────────────────────────
