@@ -42,172 +42,41 @@ WEBSOCKET_SERVER_URL = os.getenv(
 # Seconds between frames; 0 = single-shot mode.  Matches CAMERA_INTERVAL in .env.
 INTERVAL_SECONDS = float(os.getenv("CAMERA_INTERVAL", "0.5"))
 
-# Optional path to a local JPEG to send instead of a generated test image.
-# Leave unset (or empty) to fall back to the built-in minimal JPEG.
-IMAGE_PATH = os.getenv("IMAGE_PATH", "")
+# Optional WebSocket keepalive tuning. Set WS_PING_INTERVAL=0 to disable pings.
+# Defaults match websockets/uvicorn common keepalive values.
+_PING_INTERVAL_RAW = os.getenv("WS_PING_INTERVAL", "20")
+_PING_TIMEOUT_RAW = os.getenv("WS_PING_TIMEOUT", "20")
+_CLOSE_TIMEOUT_RAW = os.getenv("WS_CLOSE_TIMEOUT", "10")
 
-def _make_minimal_jpeg() -> bytes:
-    """Return a tiny but valid 1×1 white JPEG for testing without a real camera."""
-    return bytes(
-        [
-            0xFF,
-            0xD8,
-            0xFF,
-            0xE0,
-            0x00,
-            0x10,
-            0x4A,
-            0x46,
-            0x49,
-            0x46,
-            0x00,
-            0x01,
-            0x01,
-            0x00,
-            0x00,
-            0x01,
-            0x00,
-            0x01,
-            0x00,
-            0x00,
-            0xFF,
-            0xDB,
-            0x00,
-            0x43,
-            0x00,
-            0x08,
-            0x06,
-            0x06,
-            0x07,
-            0x06,
-            0x05,
-            0x08,
-            0x07,
-            0x07,
-            0x07,
-            0x09,
-            0x09,
-            0x08,
-            0x0A,
-            0x0C,
-            0x14,
-            0x0D,
-            0x0C,
-            0x0B,
-            0x0B,
-            0x0C,
-            0x19,
-            0x12,
-            0x13,
-            0x0F,
-            0x14,
-            0x1D,
-            0x1A,
-            0x1F,
-            0x1E,
-            0x1D,
-            0x1A,
-            0x1C,
-            0x1C,
-            0x20,
-            0x24,
-            0x2E,
-            0x27,
-            0x20,
-            0x22,
-            0x2C,
-            0x23,
-            0x1C,
-            0x1C,
-            0x28,
-            0x37,
-            0x29,
-            0x2C,
-            0x30,
-            0x31,
-            0x34,
-            0x34,
-            0x34,
-            0x1F,
-            0x27,
-            0x39,
-            0x3D,
-            0x38,
-            0x32,
-            0x3C,
-            0x2E,
-            0x33,
-            0x34,
-            0x32,
-            0xFF,
-            0xC0,
-            0x00,
-            0x0B,
-            0x08,
-            0x00,
-            0x01,
-            0x00,
-            0x01,
-            0x01,
-            0x01,
-            0x11,
-            0x00,
-            0xFF,
-            0xC4,
-            0x00,
-            0x1F,
-            0x00,
-            0x00,
-            0x01,
-            0x05,
-            0x01,
-            0x01,
-            0x01,
-            0x01,
-            0x01,
-            0x01,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x00,
-            0x01,
-            0x02,
-            0x03,
-            0x04,
-            0x05,
-            0x06,
-            0x07,
-            0x08,
-            0x09,
-            0x0A,
-            0x0B,
-            0xFF,
-            0xDA,
-            0x00,
-            0x08,
-            0x01,
-            0x01,
-            0x00,
-            0x00,
-            0x3F,
-            0x00,
-            0xFB,
-            0x4D,
-            0xFF,
-            0xD9,
-        ]
+PING_INTERVAL = None if _PING_INTERVAL_RAW.strip() in {"", "0", "none", "None"} else float(_PING_INTERVAL_RAW)
+PING_TIMEOUT = None if _PING_TIMEOUT_RAW.strip() in {"", "0", "none", "None"} else float(_PING_TIMEOUT_RAW)
+CLOSE_TIMEOUT = float(_CLOSE_TIMEOUT_RAW)
+
+# Folder of test images (image1/image2/image3...) to cycle through.
+TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
+def _load_test_images() -> list[Path]:
+    image_dir = Path(TEST_IMAGES_DIR)
+    if not image_dir.exists() or not image_dir.is_dir():
+        return []
+    allowed = {".jpg", ".jpeg", ".png"}
+    return sorted(
+        [p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
     )
 
 
-def _capture_frame() -> bytes:
+_TEST_IMAGES = _load_test_images()
+_TEST_IMAGE_INDEX = 0
 
-    if IMAGE_PATH and Path(IMAGE_PATH).exists():
-        return Path(IMAGE_PATH).read_bytes()
-    return _make_minimal_jpeg()
+
+def _capture_frame() -> bytes:
+    global _TEST_IMAGE_INDEX
+    if _TEST_IMAGES:
+        image_path = _TEST_IMAGES[_TEST_IMAGE_INDEX % len(_TEST_IMAGES)]
+        _TEST_IMAGE_INDEX += 1
+        return image_path.read_bytes()
+    raise FileNotFoundError(
+        f"No images found in '{TEST_IMAGES_DIR}'. Add test images or set TEST_IMAGES_DIR."
+    )
 
 
 async def run():
@@ -218,10 +87,13 @@ async def run():
     while True:
         print(f"Connecting to {uri} …")
         try:
-            # ping_interval/ping_timeout match common server defaults (20 s).
-            # Keeping them enabled ensures our client answers server pings.
+            # Ping settings are configurable via .env to avoid keepalive timeouts
+            # on slower or busy servers.
             async with websockets.connect(
-                uri, ping_interval=20, ping_timeout=20
+                uri,
+                ping_interval=PING_INTERVAL,
+                ping_timeout=PING_TIMEOUT,
+                close_timeout=CLOSE_TIMEOUT,
             ) as ws:
                 # Wait for the server handshake acknowledgment
                 ack_raw = await ws.recv()
