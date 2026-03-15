@@ -43,9 +43,9 @@ WEBSOCKET_SERVER_URL = os.getenv(
 INTERVAL_SECONDS = float(os.getenv("CAMERA_INTERVAL", "0.5"))
 
 # Optional WebSocket keepalive tuning. Set WS_PING_INTERVAL=0 to disable pings.
-# Defaults match websockets/uvicorn common keepalive values.
-_PING_INTERVAL_RAW = os.getenv("WS_PING_INTERVAL", "20")
-_PING_TIMEOUT_RAW = os.getenv("WS_PING_TIMEOUT", "20")
+# Defaults disable keepalive to avoid server-side pong timeouts.
+_PING_INTERVAL_RAW = os.getenv("WS_PING_INTERVAL", "0")
+_PING_TIMEOUT_RAW = os.getenv("WS_PING_TIMEOUT", "0")
 _CLOSE_TIMEOUT_RAW = os.getenv("WS_CLOSE_TIMEOUT", "10")
 
 PING_INTERVAL = None if _PING_INTERVAL_RAW.strip() in {"", "0", "none", "None"} else float(_PING_INTERVAL_RAW)
