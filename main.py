@@ -1,7 +1,16 @@
 from camera import capture_image, PersistentCamera
 from sensor import get_water_level
 from uploader import upload_image
-from config import SENSOR_DEVICE_ID, SENSOR_INTERVAL, CAMERA_INTERVAL, IOT_API_KEY
+from config import (
+    SENSOR_DEVICE_ID,
+    SENSOR_INTERVAL,
+    CAMERA_INTERVAL,
+    IOT_API_KEY,
+    ENABLE_CLOUDINARY_UPLOAD,
+    ENABLE_WEBSOCKET_SEND,
+    USE_TEST_IMAGES,
+    TEST_IMAGES_DIR,
+)
 import requests
 import time
 import os
@@ -11,6 +20,7 @@ import signal
 import threading
 from datetime import datetime, timezone
 from urllib.parse import urlparse, urlunparse
+from pathlib import Path
 
 try:
     import websocket as _websocket
@@ -24,6 +34,30 @@ logger = logging.getLogger(__name__)
 # Server configuration
 SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
 WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
+
+_TEST_IMAGE_INDEX = 0
+
+
+def _load_test_images() -> list[Path]:
+    image_dir = Path(TEST_IMAGES_DIR)
+    if not image_dir.exists() or not image_dir.is_dir():
+        return []
+    allowed = {".jpg", ".jpeg", ".png"}
+    return sorted(
+        [p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
+    )
+
+
+_TEST_IMAGES = _load_test_images()
+
+
+def _next_test_image_path() -> Path | None:
+    global _TEST_IMAGE_INDEX
+    if not _TEST_IMAGES:
+        return None
+    image_path = _TEST_IMAGES[_TEST_IMAGE_INDEX % len(_TEST_IMAGES)]
+    _TEST_IMAGE_INDEX += 1
+    return image_path
 
 
 def _safe_ws_url(url):
@@ -159,28 +193,58 @@ def camera_loop():
         f"[CAMERA] Loop started — interval={CAMERA_INTERVAL}s "
         f"({_fps} fps)"
     )
-    with PersistentCamera() as cam:
+    if USE_TEST_IMAGES:
+        logger.info(f"[CAMERA] Using test images from {TEST_IMAGES_DIR}")
+        cam = None
         while not stop_event.is_set():
             t0 = time.monotonic()
             path = None
             try:
-                path = cam.capture()
-                url = upload_image(path)
-                if url is None:
-                    logger.warning("Failed to upload image")
+                path = _next_test_image_path()
+                if path is None:
+                    logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
                 else:
-                    send_image_websocket(path, cloudinary_url=url)
-                    logger.info(f"Camera: uploaded {url}")
+                    url = None
+                    if ENABLE_CLOUDINARY_UPLOAD:
+                        url = upload_image(str(path))
+                        if url is None:
+                            logger.warning("Failed to upload image")
+
+                    if ENABLE_WEBSOCKET_SEND:
+                        send_image_websocket(str(path), cloudinary_url=url)
+                    if url:
+                        logger.info(f"Camera: uploaded {url}")
             except Exception as e:
                 logger.error(f"Camera loop error: {e}")
-            finally:
-                if path and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except Exception as cleanup_err:
-                        logger.warning(f"Failed to clean up {path}: {cleanup_err}")
 
             stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
+    else:
+        with PersistentCamera() as cam:
+            while not stop_event.is_set():
+                t0 = time.monotonic()
+                path = None
+                try:
+                    path = cam.capture()
+                    url = None
+                    if ENABLE_CLOUDINARY_UPLOAD:
+                        url = upload_image(path)
+                        if url is None:
+                            logger.warning("Failed to upload image")
+
+                    if ENABLE_WEBSOCKET_SEND:
+                        send_image_websocket(path, cloudinary_url=url)
+                    if url:
+                        logger.info(f"Camera: uploaded {url}")
+                except Exception as e:
+                    logger.error(f"Camera loop error: {e}")
+                finally:
+                    if path and os.path.exists(path):
+                        try:
+                            os.remove(path)
+                        except Exception as cleanup_err:
+                            logger.warning(f"Failed to clean up {path}: {cleanup_err}")
+
+                stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
 
 
 if __name__ == "__main__":
