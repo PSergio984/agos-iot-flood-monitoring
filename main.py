@@ -1,5 +1,5 @@
 from camera import capture_image, PersistentCamera
-from sensor import get_water_level
+from sensor import get_water_level, update_warning_led
 from uploader import upload_image
 from config import (
     SENSOR_DEVICE_ID,
@@ -148,6 +148,7 @@ def sensor_loop():
             if level is None:
                 logger.warning("Failed to read water level, skipping")
             else:
+                update_warning_led(level)
                 try:
                     headers = {}
                     if IOT_API_KEY:

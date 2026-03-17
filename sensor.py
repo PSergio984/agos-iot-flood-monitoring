@@ -2,6 +2,12 @@ import os
 import time
 import random
 
+from config import (
+    LED_WARNING_ENABLED,
+    LED_WARNING_PIN,
+    LED_WARNING_THRESHOLD_CM,
+)
+
 # Check if we're explicitly in mock mode or if RPi.GPIO is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
 
@@ -27,6 +33,7 @@ MAX_RETRIES = 3  # Retry count before giving up
 
 # Initialize GPIO once at module level (only if not in mock mode)
 gpio_initialized = False
+_warning_led_state = None
 
 def _init_gpio():
     """Initialize GPIO pins once at module load."""
@@ -37,10 +44,36 @@ def _init_gpio():
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(TRIG, GPIO.OUT)
         GPIO.setup(ECHO, GPIO.IN)
+        if LED_WARNING_ENABLED:
+            GPIO.setup(LED_WARNING_PIN, GPIO.OUT)
+            GPIO.output(LED_WARNING_PIN, GPIO.LOW)
         gpio_initialized = True
         # Register cleanup to run at exit
         atexit.register(GPIO.cleanup)
         print("[GPIO] Initialized successfully")
+
+
+def update_warning_led(water_level):
+    """Toggle warning LED when water level crosses configured threshold."""
+    global _warning_led_state
+
+    if not LED_WARNING_ENABLED:
+        return
+    if MOCK or not GPIO_AVAILABLE:
+        return
+
+    import RPi.GPIO as GPIO
+
+    should_turn_on = water_level is not None and water_level >= LED_WARNING_THRESHOLD_CM
+    if _warning_led_state is should_turn_on:
+        return
+
+    GPIO.output(LED_WARNING_PIN, GPIO.HIGH if should_turn_on else GPIO.LOW)
+    _warning_led_state = should_turn_on
+    print(
+        f"[LED] Warning {'ON' if should_turn_on else 'OFF'} "
+        f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
+    )
 
 # Initialize GPIO when module is imported (skip in mock mode)
 _init_gpio()

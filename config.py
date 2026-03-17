@@ -27,3 +27,8 @@ TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
 # AEC/AWB warm-up is paid only once at startup.
 SENSOR_INTERVAL = float(os.getenv("SENSOR_INTERVAL", "1.0"))   # seconds
 CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps)
+
+# ── Local warning LED (optional) ────────────────────────────────────────────
+LED_WARNING_ENABLED = os.getenv("LED_WARNING_ENABLED", "false").lower() == "true"
+LED_WARNING_PIN = int(os.getenv("LED_WARNING_PIN", "18"))
+LED_WARNING_THRESHOLD_CM = float(os.getenv("LED_WARNING_THRESHOLD_CM", "10.0"))
