@@ -64,7 +64,8 @@ def update_warning_led(water_level):
 
     import RPi.GPIO as GPIO
 
-    should_turn_on = water_level is not None and water_level >= LED_WARNING_THRESHOLD_CM
+    # For distance sensors, lower distance means higher water level/risk.
+    should_turn_on = water_level is not None and water_level <= LED_WARNING_THRESHOLD_CM
     if _warning_led_state is should_turn_on:
         return
 
