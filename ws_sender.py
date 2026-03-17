@@ -21,9 +21,11 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from dotenv import load_dotenv
+from camera import capture_image
 
 load_dotenv()
 
@@ -54,6 +56,9 @@ CLOSE_TIMEOUT = float(_CLOSE_TIMEOUT_RAW)
 
 # Folder of test images (image1/image2/image3...) to cycle through.
 TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
+USE_TEST_IMAGES = os.getenv("USE_TEST_IMAGES", "false").strip().lower() == "true"
+
+
 def _load_test_images() -> list[Path]:
     image_dir = Path(TEST_IMAGES_DIR)
     if not image_dir.exists() or not image_dir.is_dir():
@@ -70,13 +75,20 @@ _TEST_IMAGE_INDEX = 0
 
 def _capture_frame() -> bytes:
     global _TEST_IMAGE_INDEX
-    if _TEST_IMAGES:
+    if USE_TEST_IMAGES:
+        if not _TEST_IMAGES:
+            raise FileNotFoundError(
+                f"USE_TEST_IMAGES=true but no images found in '{TEST_IMAGES_DIR}'. "
+                "Add test images or set USE_TEST_IMAGES=false."
+            )
         image_path = _TEST_IMAGES[_TEST_IMAGE_INDEX % len(_TEST_IMAGES)]
         _TEST_IMAGE_INDEX += 1
         return image_path.read_bytes()
-    raise FileNotFoundError(
-        f"No images found in '{TEST_IMAGES_DIR}'. Add test images or set TEST_IMAGES_DIR."
-    )
+
+    # Use the project camera pipeline when not forcing test images.
+    # This honors MOCK_MODE / USE_FSWEBCAM / real camera settings from .env.
+    frame_path = capture_image(os.path.join(tempfile.gettempdir(), "ws_sender_frame.jpg"))
+    return Path(frame_path).read_bytes()
 
 
 async def run():
