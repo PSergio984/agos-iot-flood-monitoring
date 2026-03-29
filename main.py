@@ -1,6 +1,7 @@
-from camera import capture_image, PersistentCamera
+from camera import PersistentCamera
 from sensor import get_water_level, update_warning_led
 from uploader import upload_image
+from water_level_filter import WaterLevelFilter
 from config import (
     SENSOR_DEVICE_ID,
     SENSOR_INTERVAL,
@@ -10,6 +11,13 @@ from config import (
     ENABLE_WEBSOCKET_SEND,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
+    SENSOR_FILTER_ENABLED,
+    SENSOR_FILTER_WINDOW_SIZE,
+    SENSOR_FILTER_MIN_VALID_SAMPLES,
+    SENSOR_FILTER_MIN_CM,
+    SENSOR_FILTER_MAX_CM,
+    SENSOR_FILTER_MODZ_THRESHOLD,
+    SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
 )
 import requests
 import time
@@ -63,6 +71,8 @@ def _next_test_image_path() -> Path | None:
 def _safe_ws_url(url):
     """Return scheme+host+port only — strips userinfo, path, query, and fragment."""
     try:
+        if not isinstance(url, str):
+            return "<invalid url>"
         p = urlparse(url)
         # netloc may contain 'user:pass@host:port'; keep only 'host:port'
         host_port = p.hostname or ""
@@ -129,6 +139,17 @@ def send_image_websocket(image_path, cloudinary_url=None):
 stop_event = threading.Event()
 
 
+water_level_filter = WaterLevelFilter(
+    enabled=SENSOR_FILTER_ENABLED,
+    window_size=SENSOR_FILTER_WINDOW_SIZE,
+    min_valid_samples=SENSOR_FILTER_MIN_VALID_SAMPLES,
+    min_cm=SENSOR_FILTER_MIN_CM,
+    max_cm=SENSOR_FILTER_MAX_CM,
+    modz_threshold=SENSOR_FILTER_MODZ_THRESHOLD,
+    zero_mad_tolerance_cm=SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
+)
+
+
 def signal_handler(sig, frame):
     logger.info("Shutdown requested")
     stop_event.set()
@@ -148,33 +169,42 @@ def sensor_loop():
             if level is None:
                 logger.warning("Failed to read water level, skipping")
             else:
-                update_warning_led(level)
-                try:
-                    headers = {}
-                    if IOT_API_KEY:
-                        headers["x-api-key"] = IOT_API_KEY
-                    else:
-                        logger.warning("[SENSOR] IOT_API_KEY is not set; request may be rejected with 401")
+                filtered_level, filter_status = water_level_filter.process(level)
+                if filtered_level is None:
+                    logger.warning(
+                        f"[SENSOR] Dropped raw level={level}cm (reason={filter_status})"
+                    )
+                else:
+                    update_warning_led(filtered_level)
+                    try:
+                        headers = {}
+                        if IOT_API_KEY:
+                            headers["x-api-key"] = IOT_API_KEY
+                        else:
+                            logger.warning("[SENSOR] IOT_API_KEY is not set; request may be rejected with 401")
 
-                    payload = {
-                        "sensor_device_id": SENSOR_DEVICE_ID,
-                        "raw_distance_cm": level,
-                        "signal_strength": 100,
-                        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    }
-                    response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
-                    response.raise_for_status()
-                    logger.info(f"Sensor: distance={level}cm device={SENSOR_DEVICE_ID}")
-                except requests.exceptions.Timeout:
-                    logger.error(f"Timeout posting sensor data to {SERVER_URL}")
-                except requests.exceptions.RequestException as e:
-                    if hasattr(e, "response") and e.response is not None:
-                        logger.error(
-                            f"Sensor post failed: status={e.response.status_code} "
-                            f"body={e.response.text}"
+                        payload = {
+                            "sensor_device_id": SENSOR_DEVICE_ID,
+                            "raw_distance_cm": round(level, 2),
+                            "signal_strength": 100,
+                            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                        }
+                        response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
+                        response.raise_for_status()
+                        logger.info(
+                            f"Sensor: raw={level}cm filtered={filtered_level:.2f}cm "
+                            f"device={SENSOR_DEVICE_ID} filter={filter_status}"
                         )
-                    else:
-                        logger.error(f"Sensor post failed: {e}")
+                    except requests.exceptions.Timeout:
+                        logger.error(f"Timeout posting sensor data to {SERVER_URL}")
+                    except requests.exceptions.RequestException as e:
+                        if hasattr(e, "response") and e.response is not None:
+                            logger.error(
+                                f"Sensor post failed: status={e.response.status_code} "
+                                f"body={e.response.text}"
+                            )
+                        else:
+                            logger.error(f"Sensor post failed: {e}")
         except Exception as e:
             logger.error(f"Sensor loop error: {e}")
 

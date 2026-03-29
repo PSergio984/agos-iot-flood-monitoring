@@ -32,3 +32,16 @@ CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps
 LED_WARNING_ENABLED = os.getenv("LED_WARNING_ENABLED", "false").lower() == "true"
 LED_WARNING_PIN = int(os.getenv("LED_WARNING_PIN", "18"))
 LED_WARNING_THRESHOLD_CM = float(os.getenv("LED_WARNING_THRESHOLD_CM", "10.0"))
+
+# ── Sensor filtering (outlier rejection + smoothing) ───────────────────────
+# Recommended baseline for ultrasonic water-level telemetry:
+# 1) Physical range gate
+# 2) Robust outlier check using MAD-based modified Z-score
+# 3) Rolling average of accepted readings
+SENSOR_FILTER_ENABLED = os.getenv("SENSOR_FILTER_ENABLED", "true").lower() == "true"
+SENSOR_FILTER_WINDOW_SIZE = int(os.getenv("SENSOR_FILTER_WINDOW_SIZE", "7"))
+SENSOR_FILTER_MIN_VALID_SAMPLES = int(os.getenv("SENSOR_FILTER_MIN_VALID_SAMPLES", "3"))
+SENSOR_FILTER_MIN_CM = float(os.getenv("SENSOR_FILTER_MIN_CM", "0.0"))
+SENSOR_FILTER_MAX_CM = float(os.getenv("SENSOR_FILTER_MAX_CM", "400.0"))
+SENSOR_FILTER_MODZ_THRESHOLD = float(os.getenv("SENSOR_FILTER_MODZ_THRESHOLD", "3.5"))
+SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM = float(os.getenv("SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM", "1.0"))
