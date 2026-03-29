@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime as dt
 
 import camera
 
@@ -41,3 +42,42 @@ def test_persistent_camera_capture_delegates_to_capture_image_in_mock(monkeypatc
     assert called["ok"] is True
     assert result == str(out)
     assert out.read_bytes() == b"frame"
+
+
+def test_ir_cut_controller_manual_modes():
+    day_ctrl = camera.IRCutController(mode="day", min_switch_interval_s=30)
+    night_ctrl = camera.IRCutController(mode="night", min_switch_interval_s=30)
+
+    assert day_ctrl.target_day_mode() is True
+    assert night_ctrl.target_day_mode() is False
+
+
+def test_ir_cut_controller_auto_window(monkeypatch):
+    monkeypatch.setattr(camera, "IR_CUT_DAY_START_HOUR", 6)
+    monkeypatch.setattr(camera, "IR_CUT_NIGHT_START_HOUR", 18)
+    ctrl = camera.IRCutController(mode="auto", min_switch_interval_s=30)
+
+    assert ctrl.target_day_mode(dt.datetime(2025, 1, 1, 7, 0, 0)) is True
+    assert ctrl.target_day_mode(dt.datetime(2025, 1, 1, 19, 0, 0)) is False
+
+
+def test_ir_cut_controller_applies_switch_after_filtering_delay(monkeypatch):
+    monkeypatch.setattr(camera, "IR_CUT_DAY_START_HOUR", 6)
+    monkeypatch.setattr(camera, "IR_CUT_NIGHT_START_HOUR", 18)
+    ctrl = camera.IRCutController(mode="auto", min_switch_interval_s=30)
+
+    calls = []
+
+    def fake_set_ir_cut_mode(day):
+        calls.append(day)
+
+    monkeypatch.setattr(camera, "set_ir_cut_mode", fake_set_ir_cut_mode)
+
+    # Initial daytime apply.
+    assert ctrl.maybe_apply(now=dt.datetime(2025, 1, 1, 17, 59, 50), force=True) is True
+    # Too soon to switch to night.
+    assert ctrl.maybe_apply(now=dt.datetime(2025, 1, 1, 18, 0, 10)) is False
+    # Delay elapsed: switch should apply.
+    assert ctrl.maybe_apply(now=dt.datetime(2025, 1, 1, 18, 0, 25)) is True
+
+    assert calls == [True, False]

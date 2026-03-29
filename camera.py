@@ -12,6 +12,11 @@ CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
 
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
+IR_CUT_MODE = os.getenv("IR_CUT_MODE", "auto").strip().lower()
+IR_CUT_DAY_START_HOUR = int(os.getenv("IR_CUT_DAY_START_HOUR", "6"))
+IR_CUT_NIGHT_START_HOUR = int(os.getenv("IR_CUT_NIGHT_START_HOUR", "18"))
+IR_CUT_MIN_SWITCH_INTERVAL_S = int(os.getenv("IR_CUT_MIN_SWITCH_INTERVAL_S", "30"))
+IR_CUT_DAY_HIGH = os.getenv("IR_CUT_DAY_HIGH", "true").strip().lower() == "true"
 
 # Check if we're explicitly in mock mode or if picamera2 is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
@@ -45,9 +50,85 @@ except Exception as e:
 
 # ── IR-CUT filter helpers ────────────────────────────────────────────────────
 
-def _is_daytime() -> bool:
-    """Simple time-based heuristic: daytime = 06:00–18:00 local time."""
-    return 6 <= datetime.datetime.now().hour < 18
+def _sanitize_hour(hour: int, fallback: int) -> int:
+    return hour if 0 <= hour <= 23 else fallback
+
+
+def _normalize_ir_mode(mode: str) -> str:
+    if mode in {"auto", "day", "night"}:
+        return mode
+    print(f"[CAMERA] Invalid IR_CUT_MODE='{mode}', falling back to 'auto'")
+    return "auto"
+
+
+def _is_daytime(now: datetime.datetime | None = None) -> bool:
+    """Time-window day/night heuristic with support for midnight-crossing windows."""
+    dt = now or datetime.datetime.now()
+    hour = dt.hour
+    day_start = _sanitize_hour(IR_CUT_DAY_START_HOUR, 6)
+    night_start = _sanitize_hour(IR_CUT_NIGHT_START_HOUR, 18)
+
+    # Normal window (e.g. 06:00-18:00)
+    if day_start < night_start:
+        return day_start <= hour < night_start
+
+    # Midnight-crossing day window (e.g. 18:00-06:00)
+    if day_start > night_start:
+        return hour >= day_start or hour < night_start
+
+    # Same start hour means "always day" in auto mode.
+    return True
+
+
+class IRCutController:
+    """Applies IR-CUT mode changes with anti-flap delay."""
+
+    def __init__(
+        self,
+        mode: str,
+        min_switch_interval_s: int,
+    ):
+        self.mode = _normalize_ir_mode(mode)
+        self.min_switch_interval_s = max(0, int(min_switch_interval_s))
+        self._last_day: bool | None = None
+        self._last_switch_at: datetime.datetime | None = None
+
+    def target_day_mode(self, now: datetime.datetime | None = None) -> bool:
+        if self.mode == "day":
+            return True
+        if self.mode == "night":
+            return False
+        return _is_daytime(now)
+
+    def should_apply(self, desired_day: bool, now: datetime.datetime | None = None, force: bool = False) -> bool:
+        if force or self._last_day is None:
+            return True
+        if desired_day == self._last_day:
+            return False
+        if self._last_switch_at is None:
+            return True
+
+        dt = now or datetime.datetime.now()
+        elapsed = (dt - self._last_switch_at).total_seconds()
+        return elapsed >= self.min_switch_interval_s
+
+    def mark_applied(self, desired_day: bool, now: datetime.datetime | None = None) -> None:
+        self._last_day = desired_day
+        self._last_switch_at = now or datetime.datetime.now()
+
+    def maybe_apply(self, now: datetime.datetime | None = None, force: bool = False) -> bool:
+        desired_day = self.target_day_mode(now)
+        if not self.should_apply(desired_day, now=now, force=force):
+            return False
+        set_ir_cut_mode(desired_day)
+        self.mark_applied(desired_day, now=now)
+        return True
+
+
+_ir_cut_controller = IRCutController(
+    mode=IR_CUT_MODE,
+    min_switch_interval_s=IR_CUT_MIN_SWITCH_INTERVAL_S,
+)
 
 
 def set_ir_cut_mode(day: bool) -> None:
@@ -62,9 +143,11 @@ def set_ir_cut_mode(day: bool) -> None:
         if GPIO.getmode() is None:
             GPIO.setmode(GPIO.BCM)
         GPIO.setup(IR_CUT_PIN, GPIO.OUT)
-        GPIO.output(IR_CUT_PIN, GPIO.HIGH if day else GPIO.LOW)
+        gpio_high = day if IR_CUT_DAY_HIGH else (not day)
+        GPIO.output(IR_CUT_PIN, GPIO.HIGH if gpio_high else GPIO.LOW)
         label = "DAY (colour, IR filter in)" if day else "NIGHT (IR vision, LEDs auto)"
-        print(f"[CAMERA] IR-CUT → {label}")
+        level = "HIGH" if gpio_high else "LOW"
+        print(f"[CAMERA] IR-CUT → {label} (GPIO {IR_CUT_PIN}={level})")
     except Exception as e:
         print(f"[CAMERA] IR-CUT GPIO error: {e}")
 
@@ -132,7 +215,7 @@ def capture_image(path=None):
     import time
     cam = None
     try:
-        set_ir_cut_mode(day=_is_daytime())
+        _ir_cut_controller.maybe_apply(force=True)
         cam = Picamera2()
         # Configure for high-quality stills at target resolution.
         # create_still_configuration() overrides the default 640×480 preview mode.
@@ -188,7 +271,7 @@ class PersistentCamera:
         if self._cam is not None:
             self.stop()  # Close existing camera before re-opening
         import time
-        set_ir_cut_mode(day=_is_daytime())
+        _ir_cut_controller.maybe_apply(force=True)
         self._cam = Picamera2()
         # ScalerCrop baked into config so AEC/AWB converges on the correct
         # sensor region from the very first frame.
@@ -217,6 +300,7 @@ class PersistentCamera:
             path = os.path.join(tempfile.gettempdir(), f"frame_{ts}.jpg")
         if MOCK or not PICAMERA_AVAILABLE or self._cam is None:
             return capture_image(path)  # use mock path
+        _ir_cut_controller.maybe_apply()
         self._cam.capture_file(path)
         return path
 
