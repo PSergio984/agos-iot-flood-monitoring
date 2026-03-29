@@ -77,6 +77,7 @@ Key gaps AGOS addresses:
 ## ✨ Key Features
 
 - **Raspberry Pi Camera Capture** — Captures waterway footage at 1 FPS and streams frames to the AGOS backend for YOLOv8 inference
+- **Low-Quality Frame Rejection** — Discards unusable camera frames using lightweight OpenCV pre-processing checks (brightness, contrast, and blur), not local AI inference; this adds modest CPU overhead on constrained devices such as Raspberry Pi Zero W
 - **IoT Water Level Sensing** — JSN-SR04T waterproof ultrasonic sensor transmits water depth readings every 30 seconds via HTTPS POST
 - **Lightweight Edge Design** — Raspberry Pi Zero W keeps hardware costs low and power consumption minimal; no local AI inference required
 - **Secure Data Transmission** — All sensor and image data sent via HTTPS to the backend server
@@ -129,7 +130,7 @@ Edge Hardware: Raspberry Pi Zero W · Raspberry Pi Camera Module
 Sensor: JSN-SR04T Waterproof Ultrasonic Sensor
 Language: Python 3.9+
 Connectivity: 4G SIM Module · WiFi (RPi built-in)
-Libraries: Picamera2 · RPi.GPIO · requests
+Libraries: Picamera2 · OpenCV (cv2) · RPi.GPIO · requests
 Protocol: HTTPS POST to AGOS Backend REST API
 Enclosure: IP67 Weatherproof Housing
 
@@ -205,6 +206,27 @@ User management and authentication are handled by the **`agos-backend`** and **`
 
 ```
 
+Frame discard behavior for low-quality images:
+
+- If a captured frame fails quality checks, this IoT module skips transmission for that frame and waits until the next 1-second camera cycle.
+- The backend fusion engine receives no image update for that specific second and continues using available modalities (latest valid visual state, water level telemetry, and weather input) according to backend-side logic.
+- As a result, the data-flow diagram above can have intentional per-second visual gaps under poor image conditions.
+
+Unusable frame implementation guidelines (default thresholds in code):
+
+- Brightness mean: reject if `< 25.0` or `> 230.0`
+- Contrast (grayscale stddev): reject if `< 10.0`
+- Blur (variance of Laplacian): reject if `< 80.0`
+- Performance guard: resize width `320` before metric computation to reduce CPU load
+
+These defaults are configurable through environment variables:
+
+- `FRAME_QUALITY_MIN_BRIGHTNESS`
+- `FRAME_QUALITY_MAX_BRIGHTNESS`
+- `FRAME_QUALITY_MIN_CONTRAST_STDDEV`
+- `FRAME_QUALITY_MIN_LAPLACIAN_VAR`
+- `FRAME_QUALITY_RESIZE_WIDTH`
+
 ---
 
 ## 📏 Scope & Limitations
@@ -258,6 +280,7 @@ This is the **edge hardware module** of AGOS — an AI flood detection and early
 - **Water Level Sensor:** Read from JSN-SR04T via GPIO using time-of-flight calculation. Transmit via `HTTPS POST` to the backend every **30 seconds**
 - **Data Transmission:** All data sent to the `agos-backend` REST API via HTTPS. Use the `requests` library — keep all outbound calls non-blocking with a timeout
 - **No Local AI:** Do not add YOLOv8 or any ML inference to this module. All inference happens on the backend server
+- **Frame Quality Gate:** Before upload, run only lightweight OpenCV checks and discard unusable frames; avoid heavy image processing
 - **No Database:** This module does not have a local database. If a transmission fails, log the failure and retry on the next cycle — do not queue indefinitely
 
 ---

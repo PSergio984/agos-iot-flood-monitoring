@@ -1,4 +1,5 @@
 from camera import PersistentCamera
+from frame_quality import is_frame_usable
 from sensor import get_water_level, update_warning_led
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
@@ -235,6 +236,10 @@ def camera_loop():
                 if path is None:
                     logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
                 else:
+                    if not is_frame_usable(str(path)):
+                        stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
+                        continue
+
                     url = None
                     if ENABLE_CLOUDINARY_UPLOAD:
                         url = upload_image(str(path))
@@ -256,6 +261,10 @@ def camera_loop():
                 path = None
                 try:
                     path = cam.capture()
+                    if not is_frame_usable(path):
+                        stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
+                        continue
+
                     url = None
                     if ENABLE_CLOUDINARY_UPLOAD:
                         url = upload_image(path)

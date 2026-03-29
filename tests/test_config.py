@@ -17,3 +17,19 @@ def test_filter_config_types_and_basic_constraints():
     assert config.SENSOR_FILTER_MAX_CM >= config.SENSOR_FILTER_MIN_CM
     assert config.SENSOR_FILTER_MODZ_THRESHOLD > 0
     assert config.SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM >= 0
+
+
+def test_frame_quality_config_types_and_basic_constraints():
+    assert isinstance(config.FRAME_QUALITY_CHECK_ENABLED, bool)
+    assert isinstance(config.FRAME_QUALITY_MIN_BRIGHTNESS, float)
+    assert isinstance(config.FRAME_QUALITY_MAX_BRIGHTNESS, float)
+    assert isinstance(config.FRAME_QUALITY_MIN_CONTRAST_STDDEV, float)
+    assert isinstance(config.FRAME_QUALITY_MIN_LAPLACIAN_VAR, float)
+    assert isinstance(config.FRAME_QUALITY_RESIZE_WIDTH, int)
+
+    assert 0 <= config.FRAME_QUALITY_MIN_BRIGHTNESS <= 255
+    assert 0 <= config.FRAME_QUALITY_MAX_BRIGHTNESS <= 255
+    assert config.FRAME_QUALITY_MAX_BRIGHTNESS >= config.FRAME_QUALITY_MIN_BRIGHTNESS
+    assert config.FRAME_QUALITY_MIN_CONTRAST_STDDEV >= 0
+    assert config.FRAME_QUALITY_MIN_LAPLACIAN_VAR >= 0
+    assert config.FRAME_QUALITY_RESIZE_WIDTH >= 0
