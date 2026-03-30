@@ -69,6 +69,7 @@ def test_send_image_websocket_success(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
+    monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", True)
 
     assert main.send_image_websocket(str(image), cloudinary_url="https://cdn/x.jpg") is True
     assert fake_ws.closed is True
@@ -84,6 +85,48 @@ def test_send_image_websocket_success(monkeypatch, tmp_path):
     frame_type, binary_payload = fake_ws.frames[1]
     assert frame_type == "binary"
     assert binary_payload == b"jpeg-bytes"
+
+
+def test_send_image_websocket_binary_only_mode(monkeypatch, tmp_path):
+    image = tmp_path / "img.jpg"
+    image.write_bytes(b"jpeg-bytes")
+
+    class FakeWS:
+        def __init__(self):
+            self.frames = []
+            self.closed = False
+
+        def send(self, payload):
+            self.frames.append(("text", payload))
+
+        def send_binary(self, payload):
+            self.frames.append(("binary", payload))
+
+        def close(self):
+            self.closed = True
+
+    fake_ws = FakeWS()
+
+    class FakeWebsocketModule:
+        class WebSocketTimeoutException(Exception):
+            pass
+
+        class WebSocketConnectionClosedException(Exception):
+            pass
+
+        @staticmethod
+        def create_connection(_url, timeout):
+            assert timeout == 10
+            return fake_ws
+
+    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
+    monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
+    monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
+
+    assert main.send_image_websocket(str(image), cloudinary_url="https://cdn/x.jpg") is True
+    assert fake_ws.closed is True
+    assert fake_ws.frames == [("binary", b"jpeg-bytes")]
 
 
 def test_send_image_websocket_timeout_path(monkeypatch, tmp_path):

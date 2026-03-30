@@ -21,6 +21,7 @@ class WaterLevelFilter:
         max_cm,
         modz_threshold,
         zero_mad_tolerance_cm,
+        rebaseline_outlier_streak,
     ):
         self.enabled = enabled
         self.window_size = max(3, int(window_size))
@@ -29,7 +30,10 @@ class WaterLevelFilter:
         self.max_cm = float(max_cm)
         self.modz_threshold = float(modz_threshold)
         self.zero_mad_tolerance_cm = float(zero_mad_tolerance_cm)
+        self.rebaseline_outlier_streak = max(2, int(rebaseline_outlier_streak))
         self._history = deque(maxlen=self.window_size)
+        self._outlier_streak = 0
+        self._outlier_buffer = deque(maxlen=self.window_size)
 
     def _range_valid(self, value):
         return self.min_cm <= value <= self.max_cm
@@ -47,6 +51,8 @@ class WaterLevelFilter:
             return None, "non-finite"
 
         if not self._range_valid(value):
+            self._outlier_streak = 0
+            self._outlier_buffer.clear()
             return None, "out-of-range"
 
         if not self.enabled:
@@ -60,12 +66,32 @@ class WaterLevelFilter:
 
             if mad == 0:
                 if abs(value - median) > self.zero_mad_tolerance_cm:
+                    self._outlier_streak += 1
+                    self._outlier_buffer.append(value)
+                    if self._outlier_streak >= self.rebaseline_outlier_streak:
+                        self._history.clear()
+                        self._history.extend(self._outlier_buffer)
+                        self._outlier_streak = 0
+                        self._outlier_buffer.clear()
+                        filtered = sum(self._history) / len(self._history)
+                        return filtered, "rebaseline"
                     return None, "outlier-zero-mad"
             else:
                 modified_z = 0.6745 * abs(value - median) / mad
                 if modified_z > self.modz_threshold:
+                    self._outlier_streak += 1
+                    self._outlier_buffer.append(value)
+                    if self._outlier_streak >= self.rebaseline_outlier_streak:
+                        self._history.clear()
+                        self._history.extend(self._outlier_buffer)
+                        self._outlier_streak = 0
+                        self._outlier_buffer.clear()
+                        filtered = sum(self._history) / len(self._history)
+                        return filtered, "rebaseline"
                     return None, "outlier-modz"
 
+        self._outlier_streak = 0
+        self._outlier_buffer.clear()
         self._history.append(value)
         filtered = sum(self._history) / len(self._history)
         return filtered, "ok"

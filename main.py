@@ -1,5 +1,5 @@
 from camera import PersistentCamera
-from frame_quality import is_frame_usable
+from frame_quality import get_frame_quality_metrics, is_frame_usable
 from sensor import get_water_level, update_warning_led
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
@@ -10,8 +10,10 @@ from config import (
     IOT_API_KEY,
     ENABLE_CLOUDINARY_UPLOAD,
     ENABLE_WEBSOCKET_SEND,
+    WS_SEND_METADATA_FIRST,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
+    SENSOR_POST_ENABLED,
     SENSOR_FILTER_ENABLED,
     SENSOR_FILTER_WINDOW_SIZE,
     SENSOR_FILTER_MIN_VALID_SAMPLES,
@@ -19,6 +21,7 @@ from config import (
     SENSOR_FILTER_MAX_CM,
     SENSOR_FILTER_MODZ_THRESHOLD,
     SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
+    SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
 )
 import requests
 import time
@@ -84,6 +87,16 @@ def _safe_ws_url(url):
         return "<invalid url>"
 
 
+def _format_frame_metrics(metrics):
+    if not metrics:
+        return "metrics=unavailable"
+    return (
+        f"brightness={metrics['brightness']:.2f} "
+        f"contrast_stddev={metrics['contrast_stddev']:.2f} "
+        f"laplacian_var={metrics['laplacian_var']:.2f}"
+    )
+
+
 def send_image_websocket(image_path, cloudinary_url=None):
     """Send captured image to WebSocket server.
 
@@ -115,15 +128,17 @@ def send_image_websocket(image_path, cloudinary_url=None):
                 "size": len(image_data),
                 "cloudinary_url": cloudinary_url,
             }
-            # Frame 1: metadata as JSON text
-            ws.send(json.dumps(metadata))
-            # Frame 2: raw image bytes
+            if WS_SEND_METADATA_FIRST:
+                # Optional frame 1: metadata as JSON text.
+                ws.send(json.dumps(metadata))
+            # Raw image bytes frame.
             ws.send_binary(image_data)
         finally:
             ws.close()
 
         logger.info(
-            f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(WEBSOCKET_SERVER_URL)}"
+            f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(WEBSOCKET_SERVER_URL)} "
+            f"(metadata_first={WS_SEND_METADATA_FIRST})"
         )
         return True
 
@@ -148,6 +163,7 @@ water_level_filter = WaterLevelFilter(
     max_cm=SENSOR_FILTER_MAX_CM,
     modz_threshold=SENSOR_FILTER_MODZ_THRESHOLD,
     zero_mad_tolerance_cm=SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
+    rebaseline_outlier_streak=SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
 )
 
 
@@ -177,6 +193,14 @@ def sensor_loop():
                     )
                 else:
                     update_warning_led(filtered_level)
+                    logger.info(
+                        f"[SENSOR] Local reading raw={level}cm filtered={filtered_level:.2f}cm "
+                        f"device={SENSOR_DEVICE_ID} filter={filter_status}"
+                    )
+
+                    if not SENSOR_POST_ENABLED:
+                        continue
+
                     try:
                         headers = {}
                         if IOT_API_KEY:
@@ -191,11 +215,17 @@ def sensor_loop():
                             "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                         }
                         response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
-                        response.raise_for_status()
-                        logger.info(
-                            f"Sensor: raw={level}cm filtered={filtered_level:.2f}cm "
-                            f"device={SENSOR_DEVICE_ID} filter={filter_status}"
-                        )
+                        if response.status_code == 429:
+                            logger.warning(
+                                "[SENSOR] API rate-limited (429). "
+                                "Keeping local logs and retrying next cycle."
+                            )
+                        else:
+                            response.raise_for_status()
+                            logger.info(
+                                f"Sensor posted: raw={level}cm filtered={filtered_level:.2f}cm "
+                                f"device={SENSOR_DEVICE_ID} filter={filter_status}"
+                            )
                     except requests.exceptions.Timeout:
                         logger.error(f"Timeout posting sensor data to {SERVER_URL}")
                     except requests.exceptions.RequestException as e:
@@ -237,6 +267,10 @@ def camera_loop():
                     logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
                 else:
                     if not is_frame_usable(str(path)):
+                        metrics = get_frame_quality_metrics(str(path))
+                        logger.warning(
+                            f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
+                        )
                         stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
                         continue
 
@@ -247,7 +281,9 @@ def camera_loop():
                             logger.warning("Failed to upload image")
 
                     if ENABLE_WEBSOCKET_SEND:
-                        send_image_websocket(str(path), cloudinary_url=url)
+                        ws_ok = send_image_websocket(str(path), cloudinary_url=url)
+                        if not ws_ok:
+                            logger.warning(f"[CAMERA] WebSocket send failed for {path}")
                     if url:
                         logger.info(f"Camera: uploaded {url}")
             except Exception as e:
@@ -262,6 +298,10 @@ def camera_loop():
                 try:
                     path = cam.capture()
                     if not is_frame_usable(path):
+                        metrics = get_frame_quality_metrics(path)
+                        logger.warning(
+                            f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
+                        )
                         stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
                         continue
 
@@ -272,7 +312,9 @@ def camera_loop():
                             logger.warning("Failed to upload image")
 
                     if ENABLE_WEBSOCKET_SEND:
-                        send_image_websocket(path, cloudinary_url=url)
+                        ws_ok = send_image_websocket(path, cloudinary_url=url)
+                        if not ws_ok:
+                            logger.warning(f"[CAMERA] WebSocket send failed for {path}")
                     if url:
                         logger.info(f"Camera: uploaded {url}")
                 except Exception as e:

@@ -13,8 +13,10 @@ SENSOR_DEVICE_ID = int(os.getenv("SENSOR_DEVICE_ID", "1"))
 # ── Feature toggles ─────────────────────────────────────────────────────────
 ENABLE_CLOUDINARY_UPLOAD = os.getenv("ENABLE_CLOUDINARY_UPLOAD", "true").lower() == "true"
 ENABLE_WEBSOCKET_SEND = os.getenv("ENABLE_WEBSOCKET_SEND", "true").lower() == "true"
+WS_SEND_METADATA_FIRST = os.getenv("WS_SEND_METADATA_FIRST", "false").lower() == "true"
 USE_TEST_IMAGES = os.getenv("USE_TEST_IMAGES", "false").lower() == "true"
 TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
+SENSOR_POST_ENABLED = os.getenv("SENSOR_POST_ENABLED", "true").lower() == "true"
 
 # ── Timing / throughput ──────────────────────────────────────────────────────
 # How often each subsystem runs.  Adjust these (or the matching env vars) to
@@ -45,6 +47,7 @@ SENSOR_FILTER_MIN_CM = float(os.getenv("SENSOR_FILTER_MIN_CM", "0.0"))
 SENSOR_FILTER_MAX_CM = float(os.getenv("SENSOR_FILTER_MAX_CM", "400.0"))
 SENSOR_FILTER_MODZ_THRESHOLD = float(os.getenv("SENSOR_FILTER_MODZ_THRESHOLD", "3.5"))
 SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM = float(os.getenv("SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM", "1.0"))
+SENSOR_FILTER_REBASELINE_OUTLIER_STREAK = int(os.getenv("SENSOR_FILTER_REBASELINE_OUTLIER_STREAK", "5"))
 
 # ── Camera frame quality gate (lightweight OpenCV checks) ──────────────────
 FRAME_QUALITY_CHECK_ENABLED = os.getenv("FRAME_QUALITY_CHECK_ENABLED", "true").lower() == "true"
