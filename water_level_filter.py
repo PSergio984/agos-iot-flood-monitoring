@@ -22,6 +22,7 @@ class WaterLevelFilter:
         modz_threshold,
         zero_mad_tolerance_cm,
         rebaseline_outlier_streak,
+        rebaseline_spread_max_cm,
     ):
         self.enabled = enabled
         self.window_size = max(3, int(window_size))
@@ -31,9 +32,28 @@ class WaterLevelFilter:
         self.modz_threshold = float(modz_threshold)
         self.zero_mad_tolerance_cm = float(zero_mad_tolerance_cm)
         self.rebaseline_outlier_streak = max(2, int(rebaseline_outlier_streak))
+        self.rebaseline_spread_max_cm = max(0.0, float(rebaseline_spread_max_cm))
         self._history = deque(maxlen=self.window_size)
         self._outlier_streak = 0
-        self._outlier_buffer = deque(maxlen=self.window_size)
+        self._outlier_buffer = deque(maxlen=self.rebaseline_outlier_streak)
+
+    def _can_rebaseline(self):
+        if len(self._outlier_buffer) < self.rebaseline_outlier_streak:
+            return False
+        spread = max(self._outlier_buffer) - min(self._outlier_buffer)
+        return spread <= self.rebaseline_spread_max_cm
+
+    def _handle_outlier(self, value, reason):
+        self._outlier_streak += 1
+        self._outlier_buffer.append(value)
+        if self._outlier_streak >= self.rebaseline_outlier_streak and self._can_rebaseline():
+            self._history.clear()
+            self._history.extend(self._outlier_buffer)
+            self._outlier_streak = 0
+            self._outlier_buffer.clear()
+            filtered = sum(self._history) / len(self._history)
+            return filtered, "rebaseline"
+        return None, reason
 
     def _range_valid(self, value):
         return self.min_cm <= value <= self.max_cm
@@ -66,29 +86,11 @@ class WaterLevelFilter:
 
             if mad == 0:
                 if abs(value - median) > self.zero_mad_tolerance_cm:
-                    self._outlier_streak += 1
-                    self._outlier_buffer.append(value)
-                    if self._outlier_streak >= self.rebaseline_outlier_streak:
-                        self._history.clear()
-                        self._history.extend(self._outlier_buffer)
-                        self._outlier_streak = 0
-                        self._outlier_buffer.clear()
-                        filtered = sum(self._history) / len(self._history)
-                        return filtered, "rebaseline"
-                    return None, "outlier-zero-mad"
+                    return self._handle_outlier(value, "outlier-zero-mad")
             else:
                 modified_z = 0.6745 * abs(value - median) / mad
                 if modified_z > self.modz_threshold:
-                    self._outlier_streak += 1
-                    self._outlier_buffer.append(value)
-                    if self._outlier_streak >= self.rebaseline_outlier_streak:
-                        self._history.clear()
-                        self._history.extend(self._outlier_buffer)
-                        self._outlier_streak = 0
-                        self._outlier_buffer.clear()
-                        filtered = sum(self._history) / len(self._history)
-                        return filtered, "rebaseline"
-                    return None, "outlier-modz"
+                    return self._handle_outlier(value, "outlier-modz")
 
         self._outlier_streak = 0
         self._outlier_buffer.clear()

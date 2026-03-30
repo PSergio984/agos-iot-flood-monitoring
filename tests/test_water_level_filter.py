@@ -13,6 +13,7 @@ def make_filter(**overrides):
         "modz_threshold": 3.5,
         "zero_mad_tolerance_cm": 1.0,
         "rebaseline_outlier_streak": 5,
+        "rebaseline_spread_max_cm": 8.0,
     }
     params.update(overrides)
     return WaterLevelFilter(**params)
@@ -157,6 +158,7 @@ def test_rebaseline_after_sustained_outlier_streak():
         min_valid_samples=3,
         zero_mad_tolerance_cm=0.3,
         rebaseline_outlier_streak=3,
+        rebaseline_spread_max_cm=1.0,
     )
 
     for _ in range(3):
@@ -173,3 +175,27 @@ def test_rebaseline_after_sustained_outlier_streak():
     assert value is not None
     assert status == "rebaseline"
     assert 14.0 <= value <= 14.2
+
+
+def test_inconsistent_outliers_do_not_trigger_rebaseline():
+    f = make_filter(
+        min_valid_samples=3,
+        rebaseline_outlier_streak=3,
+        rebaseline_spread_max_cm=5.0,
+    )
+
+    for _ in range(6):
+        value, status = f.process(100.0)
+        assert value is not None and status == "ok"
+
+    value, status = f.process(35.0)
+    assert value is None and status.startswith("outlier")
+
+    value, status = f.process(105.0)
+    assert value is None and status.startswith("outlier")
+
+    value, status = f.process(36.0)
+    assert value is None and status.startswith("outlier")
+
+    value, status = f.process(100.0)
+    assert value is not None and status == "ok"

@@ -11,6 +11,7 @@ def test_filter_config_types_and_basic_constraints():
     assert isinstance(config.SENSOR_FILTER_MODZ_THRESHOLD, float)
     assert isinstance(config.SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM, float)
     assert isinstance(config.SENSOR_FILTER_REBASELINE_OUTLIER_STREAK, int)
+    assert isinstance(config.SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM, float)
 
     assert config.SENSOR_FILTER_WINDOW_SIZE >= 1
     assert config.SENSOR_FILTER_MIN_VALID_SAMPLES >= 1
@@ -20,6 +21,7 @@ def test_filter_config_types_and_basic_constraints():
     assert config.SENSOR_FILTER_MODZ_THRESHOLD > 0
     assert config.SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM >= 0
     assert config.SENSOR_FILTER_REBASELINE_OUTLIER_STREAK >= 2
+    assert config.SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM >= 0
 
 
 def test_frame_quality_config_types_and_basic_constraints():

@@ -22,6 +22,7 @@ from config import (
     SENSOR_FILTER_MODZ_THRESHOLD,
     SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
+    SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
 )
 import requests
 import time
@@ -164,6 +165,7 @@ water_level_filter = WaterLevelFilter(
     modz_threshold=SENSOR_FILTER_MODZ_THRESHOLD,
     zero_mad_tolerance_cm=SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
     rebaseline_outlier_streak=SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
+    rebaseline_spread_max_cm=SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
 )
 
 
