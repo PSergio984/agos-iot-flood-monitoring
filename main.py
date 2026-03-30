@@ -1,8 +1,14 @@
-from camera import PersistentCamera
-from frame_quality import get_frame_quality_metrics, is_frame_usable
-from sensor import get_water_level, update_warning_led
-from uploader import upload_image
-from water_level_filter import WaterLevelFilter
+import requests
+import time
+import os
+import json
+import logging
+import signal
+import threading
+from datetime import datetime, timezone
+from urllib.parse import urlparse, urlunparse
+from pathlib import Path
+
 from config import (
     SENSOR_DEVICE_ID,
     SENSOR_INTERVAL,
@@ -24,16 +30,11 @@ from config import (
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
 )
-import requests
-import time
-import os
-import json
-import logging
-import signal
-import threading
-from datetime import datetime, timezone
-from urllib.parse import urlparse, urlunparse
-from pathlib import Path
+from camera import PersistentCamera
+from frame_quality import get_frame_quality_metrics, is_frame_usable
+from sensor import get_water_level, update_warning_led
+from uploader import upload_image
+from water_level_filter import WaterLevelFilter
 
 try:
     import websocket as _websocket
