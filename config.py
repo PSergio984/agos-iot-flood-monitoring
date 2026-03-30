@@ -34,6 +34,8 @@ CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps
 LED_WARNING_ENABLED = os.getenv("LED_WARNING_ENABLED", "false").lower() == "true"
 LED_WARNING_PIN = int(os.getenv("LED_WARNING_PIN", "18"))
 LED_WARNING_THRESHOLD_CM = float(os.getenv("LED_WARNING_THRESHOLD_CM", "10.0"))
+LED_CLEAR_ENABLED = os.getenv("LED_CLEAR_ENABLED", "false").lower() == "true"
+LED_CLEAR_PIN = int(os.getenv("LED_CLEAR_PIN", "15"))
 
 # ── Sensor filtering (outlier rejection + smoothing) ───────────────────────
 # Recommended baseline for ultrasonic water-level telemetry:

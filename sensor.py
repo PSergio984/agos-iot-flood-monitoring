@@ -3,6 +3,8 @@ import time
 import random
 
 from config import (
+    LED_CLEAR_ENABLED,
+    LED_CLEAR_PIN,
     LED_WARNING_ENABLED,
     LED_WARNING_PIN,
     LED_WARNING_THRESHOLD_CM,
@@ -34,6 +36,7 @@ MAX_RETRIES = 3  # Retry count before giving up
 # Initialize GPIO once at module level (only if not in mock mode)
 gpio_initialized = False
 _warning_led_state = None
+_clear_led_state = None
 
 def _init_gpio():
     """Initialize GPIO pins once at module load."""
@@ -47,6 +50,9 @@ def _init_gpio():
         if LED_WARNING_ENABLED:
             GPIO.setup(LED_WARNING_PIN, GPIO.OUT)
             GPIO.output(LED_WARNING_PIN, GPIO.LOW)
+        if LED_CLEAR_ENABLED:
+            GPIO.setup(LED_CLEAR_PIN, GPIO.OUT)
+            GPIO.output(LED_CLEAR_PIN, GPIO.LOW)
         gpio_initialized = True
         # Register cleanup to run at exit
         atexit.register(GPIO.cleanup)
@@ -54,10 +60,10 @@ def _init_gpio():
 
 
 def update_warning_led(water_level):
-    """Toggle warning LED when water level crosses configured threshold."""
-    global _warning_led_state
+    """Toggle warning/clear LEDs based on configured water-level threshold."""
+    global _warning_led_state, _clear_led_state
 
-    if not LED_WARNING_ENABLED:
+    if not LED_WARNING_ENABLED and not LED_CLEAR_ENABLED:
         return
     if MOCK or not GPIO_AVAILABLE:
         return
@@ -65,16 +71,24 @@ def update_warning_led(water_level):
     import RPi.GPIO as GPIO
 
     # For distance sensors, lower distance means higher water level/risk.
-    should_turn_on = water_level is not None and water_level <= LED_WARNING_THRESHOLD_CM
-    if _warning_led_state is should_turn_on:
-        return
+    warning_on = water_level is not None and water_level <= LED_WARNING_THRESHOLD_CM
+    clear_on = water_level is not None and not warning_on
 
-    GPIO.output(LED_WARNING_PIN, GPIO.HIGH if should_turn_on else GPIO.LOW)
-    _warning_led_state = should_turn_on
-    print(
-        f"[LED] Warning {'ON' if should_turn_on else 'OFF'} "
-        f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
-    )
+    if LED_WARNING_ENABLED and _warning_led_state is not warning_on:
+        GPIO.output(LED_WARNING_PIN, GPIO.HIGH if warning_on else GPIO.LOW)
+        _warning_led_state = warning_on
+        print(
+            f"[LED] Warning {'ON' if warning_on else 'OFF'} "
+            f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
+        )
+
+    if LED_CLEAR_ENABLED and _clear_led_state is not clear_on:
+        GPIO.output(LED_CLEAR_PIN, GPIO.HIGH if clear_on else GPIO.LOW)
+        _clear_led_state = clear_on
+        print(
+            f"[LED] Clear {'ON' if clear_on else 'OFF'} "
+            f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
+        )
 
 # Initialize GPIO when module is imported (skip in mock mode)
 _init_gpio()

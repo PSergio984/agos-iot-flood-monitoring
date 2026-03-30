@@ -24,6 +24,11 @@ def test_filter_config_types_and_basic_constraints():
 
 def test_frame_quality_config_types_and_basic_constraints():
     assert isinstance(config.WS_SEND_METADATA_FIRST, bool)
+    assert isinstance(config.LED_WARNING_ENABLED, bool)
+    assert isinstance(config.LED_WARNING_PIN, int)
+    assert isinstance(config.LED_WARNING_THRESHOLD_CM, float)
+    assert isinstance(config.LED_CLEAR_ENABLED, bool)
+    assert isinstance(config.LED_CLEAR_PIN, int)
     assert isinstance(config.FRAME_QUALITY_CHECK_ENABLED, bool)
     assert isinstance(config.FRAME_QUALITY_MIN_BRIGHTNESS, float)
     assert isinstance(config.FRAME_QUALITY_MAX_BRIGHTNESS, float)
@@ -37,3 +42,6 @@ def test_frame_quality_config_types_and_basic_constraints():
     assert config.FRAME_QUALITY_MIN_CONTRAST_STDDEV >= 0
     assert config.FRAME_QUALITY_MIN_LAPLACIAN_VAR >= 0
     assert config.FRAME_QUALITY_RESIZE_WIDTH >= 0
+    assert config.LED_WARNING_PIN >= 0
+    assert config.LED_CLEAR_PIN >= 0
+    assert config.LED_WARNING_THRESHOLD_CM >= 0
