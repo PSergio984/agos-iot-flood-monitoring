@@ -9,6 +9,7 @@ CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
 CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "false").lower() == "true"
 CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
 CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
+CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() == "true"
 
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
@@ -131,6 +132,30 @@ _ir_cut_controller = IRCutController(
 )
 
 
+def _log_runtime_scaler_crop(cam) -> None:
+    """Print active ScalerCrop metadata so FoV/crop behavior can be verified live."""
+    if not CAMERA_LOG_SCALERCROP or MOCK or not PICAMERA_AVAILABLE:
+        return
+    try:
+        metadata = cam.capture_metadata()
+        crop = metadata.get("ScalerCrop")
+        if crop is None:
+            print("[CAMERA] Runtime ScalerCrop metadata unavailable yet")
+            return
+        pixel_array = None
+        try:
+            pixel_array = cam.camera_properties.get("PixelArraySize")
+        except Exception:
+            pass
+        suffix = f", PixelArraySize={pixel_array}" if pixel_array else ""
+        print(
+            f"[CAMERA] Runtime ScalerCrop={crop}, "
+            f"output={CAMERA_WIDTH}x{CAMERA_HEIGHT}, no_crop={CAMERA_NO_CROP}{suffix}"
+        )
+    except Exception as e:
+        print(f"[CAMERA] Failed to read runtime ScalerCrop metadata: {e}")
+
+
 def set_ir_cut_mode(day: bool) -> None:
 
     if IR_CUT_PIN < 0 or MOCK or not PICAMERA_AVAILABLE:
@@ -232,6 +257,7 @@ def capture_image(path=None):
         cam.configure(config)
         cam.start()
         time.sleep(2)  # Allow AEC/AWB to converge on the correct crop region
+        _log_runtime_scaler_crop(cam)
         cam.capture_file(path)
         print(f"[CAMERA] Captured {CAMERA_WIDTH}×{CAMERA_HEIGHT} image: {path}")
         return path
@@ -286,6 +312,7 @@ class PersistentCamera:
         self._cam.configure(config)
         self._cam.start()
         time.sleep(2)  # AEC/AWB convergence on correct crop — paid once, not per frame
+        _log_runtime_scaler_crop(self._cam)
         print(f"[CAMERA] PersistentCamera ready ({CAMERA_WIDTH}×{CAMERA_HEIGHT}{'  full-sensor' if CAMERA_NO_CROP else ''})")
 
     def capture(self, path=None):
