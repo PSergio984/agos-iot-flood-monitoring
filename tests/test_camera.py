@@ -81,3 +81,43 @@ def test_ir_cut_controller_applies_switch_after_filtering_delay(monkeypatch):
     assert ctrl.maybe_apply(now=dt.datetime(2025, 1, 1, 18, 0, 25)) is True
 
     assert calls == [True, False]
+
+
+def test_get_ir_status_snapshot_reports_phase_and_ir_expectation(monkeypatch):
+    monkeypatch.setattr(camera, "IR_CUT_PIN", 17)
+    monkeypatch.setattr(camera, "MOCK", False)
+    monkeypatch.setattr(camera, "PICAMERA_AVAILABLE", True)
+    monkeypatch.setattr(camera, "IR_CUT_DAY_START_HOUR", 6)
+    monkeypatch.setattr(camera, "IR_CUT_NIGHT_START_HOUR", 18)
+    monkeypatch.setattr(camera._ir_cut_controller, "mode", "auto")
+
+    snapshot = camera.get_ir_status_snapshot(dt.datetime(2025, 1, 1, 9, 0, 0))
+
+    assert snapshot["phase"] == "day"
+    assert snapshot["desired_day_mode"] is True
+    assert snapshot["ir_pass_expected"] is False
+    assert snapshot["ir_cut_filter_expected"] == "engaged"
+
+
+def test_build_ir_status_image_creates_file(tmp_path):
+    out = tmp_path / "ir_status.jpg"
+
+    result = camera.build_ir_status_image(
+        str(out),
+        now=dt.datetime(2025, 1, 1, 9, 0, 0),
+    )
+
+    assert result == str(out)
+    assert out.exists()
+    assert out.stat().st_size > 0
+
+
+def test_ir_cut_controller_uses_consistent_datetime_awareness(monkeypatch):
+    ctrl = camera.IRCutController(mode="auto", min_switch_interval_s=30)
+
+    monkeypatch.setattr(camera, "_IR_CUT_TZ", dt.timezone.utc)
+    applied = dt.datetime(2025, 1, 1, 0, 0, 0, tzinfo=dt.timezone.utc)
+    ctrl.mark_applied(True, now=applied)
+
+    later = dt.datetime(2025, 1, 1, 0, 0, 31, tzinfo=dt.timezone.utc)
+    assert ctrl.should_apply(False, now=later) is True

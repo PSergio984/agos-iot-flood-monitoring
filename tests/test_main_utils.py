@@ -71,7 +71,11 @@ def test_send_image_websocket_success(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", True)
 
-    assert main.send_image_websocket(str(image), cloudinary_url="https://cdn/x.jpg") is True
+    assert main.send_image_websocket(
+        str(image),
+        cloudinary_url="https://cdn/x.jpg",
+        extra_metadata={"frame_role": "camera_frame", "phase": "day"},
+    ) is True
     assert fake_ws.closed is True
     assert len(fake_ws.frames) == 2
 
@@ -81,6 +85,8 @@ def test_send_image_websocket_success(monkeypatch, tmp_path):
     assert metadata["type"] == "image"
     assert metadata["filename"] == Path(image).name
     assert metadata["cloudinary_url"] == "https://cdn/x.jpg"
+    assert metadata["frame_role"] == "camera_frame"
+    assert metadata["phase"] == "day"
 
     frame_type, binary_payload = fake_ws.frames[1]
     assert frame_type == "binary"

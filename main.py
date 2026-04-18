@@ -17,6 +17,7 @@ from config import (
     ENABLE_CLOUDINARY_UPLOAD,
     ENABLE_WEBSOCKET_SEND,
     WS_SEND_METADATA_FIRST,
+    CAMERA_SEND_PRECAPTURE_STATUS_IMAGE,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
     SENSOR_POST_ENABLED,
@@ -30,7 +31,7 @@ from config import (
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
 )
-from camera import PersistentCamera
+from camera import PersistentCamera, build_ir_status_image, get_ir_status_snapshot
 from frame_quality import get_frame_quality_metrics, is_frame_usable
 from sensor import get_water_level, update_warning_led
 from uploader import upload_image
@@ -99,7 +100,49 @@ def _format_frame_metrics(metrics):
     )
 
 
-def send_image_websocket(image_path, cloudinary_url=None):
+def _send_precapture_status_image() -> None:
+    """Optionally send an IR/day-night status image before each regular frame."""
+    if not CAMERA_SEND_PRECAPTURE_STATUS_IMAGE:
+        return
+
+    status_path = None
+    try:
+        status_snapshot = get_ir_status_snapshot()
+        status_path = build_ir_status_image()
+
+        url = None
+        if ENABLE_CLOUDINARY_UPLOAD:
+            url = upload_image(status_path)
+            if url is None:
+                logger.warning("[CAMERA] Failed to upload pre-capture status image")
+
+        if ENABLE_WEBSOCKET_SEND:
+            ws_ok = send_image_websocket(
+                status_path,
+                cloudinary_url=url,
+                extra_metadata={
+                    "frame_role": "pre_capture_status",
+                    "ir_status": status_snapshot,
+                },
+            )
+            if not ws_ok:
+                logger.warning("[CAMERA] WebSocket send failed for pre-capture status image")
+
+        logger.info(
+            "[CAMERA] Pre-capture status sent "
+            f"(phase={status_snapshot['phase']} ir_pass_expected={status_snapshot['ir_pass_expected']})"
+        )
+    except Exception as e:
+        logger.error(f"[CAMERA] Failed to build/send pre-capture status image: {e}")
+    finally:
+        if status_path and os.path.exists(status_path):
+            try:
+                os.remove(status_path)
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up {status_path}: {cleanup_err}")
+
+
+def send_image_websocket(image_path, cloudinary_url=None, extra_metadata=None):
     """Send captured image to WebSocket server.
 
     Protocol:
@@ -130,6 +173,8 @@ def send_image_websocket(image_path, cloudinary_url=None):
                 "size": len(image_data),
                 "cloudinary_url": cloudinary_url,
             }
+            if extra_metadata:
+                metadata.update(extra_metadata)
             if WS_SEND_METADATA_FIRST:
                 # Optional frame 1: metadata as JSON text.
                 ws.send(json.dumps(metadata))
@@ -265,6 +310,7 @@ def camera_loop():
             t0 = time.monotonic()
             path = None
             try:
+                _send_precapture_status_image()
                 path = _next_test_image_path()
                 if path is None:
                     logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
@@ -284,7 +330,14 @@ def camera_loop():
                             logger.warning("Failed to upload image")
 
                     if ENABLE_WEBSOCKET_SEND:
-                        ws_ok = send_image_websocket(str(path), cloudinary_url=url)
+                        ws_ok = send_image_websocket(
+                            str(path),
+                            cloudinary_url=url,
+                            extra_metadata={
+                                "frame_role": "camera_frame",
+                                "ir_status": get_ir_status_snapshot(),
+                            },
+                        )
                         if not ws_ok:
                             logger.warning(f"[CAMERA] WebSocket send failed for {path}")
                     if url:
@@ -299,6 +352,7 @@ def camera_loop():
                 t0 = time.monotonic()
                 path = None
                 try:
+                    _send_precapture_status_image()
                     path = cam.capture()
                     if not is_frame_usable(path):
                         metrics = get_frame_quality_metrics(path)
@@ -315,7 +369,14 @@ def camera_loop():
                             logger.warning("Failed to upload image")
 
                     if ENABLE_WEBSOCKET_SEND:
-                        ws_ok = send_image_websocket(path, cloudinary_url=url)
+                        ws_ok = send_image_websocket(
+                            path,
+                            cloudinary_url=url,
+                            extra_metadata={
+                                "frame_role": "camera_frame",
+                                "ir_status": get_ir_status_snapshot(),
+                            },
+                        )
                         if not ws_ok:
                             logger.warning(f"[CAMERA] WebSocket send failed for {path}")
                     if url:

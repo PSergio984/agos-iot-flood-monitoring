@@ -26,6 +26,7 @@ def test_filter_config_types_and_basic_constraints():
 
 def test_frame_quality_config_types_and_basic_constraints():
     assert isinstance(config.WS_SEND_METADATA_FIRST, bool)
+    assert isinstance(config.CAMERA_SEND_PRECAPTURE_STATUS_IMAGE, bool)
     assert isinstance(config.SENSOR_TRIG_PIN, int)
     assert isinstance(config.SENSOR_ECHO_PIN, int)
     assert isinstance(config.LED_WARNING_ENABLED, bool)

@@ -4,6 +4,11 @@ import subprocess
 import tempfile
 import datetime
 
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
+
 CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
 CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
 CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "false").lower() == "true"
@@ -14,6 +19,7 @@ CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() ==
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
 IR_CUT_MODE = os.getenv("IR_CUT_MODE", "auto").strip().lower()
+IR_CUT_TIMEZONE = os.getenv("IR_CUT_TIMEZONE", "Asia/Manila").strip()
 IR_CUT_DAY_START_HOUR = int(os.getenv("IR_CUT_DAY_START_HOUR", "6"))
 IR_CUT_NIGHT_START_HOUR = int(os.getenv("IR_CUT_NIGHT_START_HOUR", "18"))
 IR_CUT_MIN_SWITCH_INTERVAL_S = int(os.getenv("IR_CUT_MIN_SWITCH_INTERVAL_S", "30"))
@@ -62,9 +68,36 @@ def _normalize_ir_mode(mode: str) -> str:
     return "auto"
 
 
+def _resolve_ir_cut_timezone(tz_name: str):
+    if not tz_name:
+        return None
+    if ZoneInfo is None:
+        print("[CAMERA] zoneinfo unavailable; falling back to system local time")
+        return None
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        print(
+            f"[CAMERA] Invalid IR_CUT_TIMEZONE='{tz_name}', "
+            "falling back to system local time"
+        )
+        return None
+
+
+_IR_CUT_TZ = _resolve_ir_cut_timezone(IR_CUT_TIMEZONE)
+
+
+def _ir_now(now: datetime.datetime | None = None) -> datetime.datetime:
+    if now is not None:
+        return now
+    if _IR_CUT_TZ is not None:
+        return datetime.datetime.now(_IR_CUT_TZ)
+    return datetime.datetime.now()
+
+
 def _is_daytime(now: datetime.datetime | None = None) -> bool:
     """Time-window day/night heuristic with support for midnight-crossing windows."""
-    dt = now or datetime.datetime.now()
+    dt = _ir_now(now)
     hour = dt.hour
     day_start = _sanitize_hour(IR_CUT_DAY_START_HOUR, 6)
     night_start = _sanitize_hour(IR_CUT_NIGHT_START_HOUR, 18)
@@ -109,13 +142,13 @@ class IRCutController:
         if self._last_switch_at is None:
             return True
 
-        dt = now or datetime.datetime.now()
+        dt = _ir_now(now)
         elapsed = (dt - self._last_switch_at).total_seconds()
         return elapsed >= self.min_switch_interval_s
 
     def mark_applied(self, desired_day: bool, now: datetime.datetime | None = None) -> None:
         self._last_day = desired_day
-        self._last_switch_at = now or datetime.datetime.now()
+        self._last_switch_at = _ir_now(now)
 
     def maybe_apply(self, now: datetime.datetime | None = None, force: bool = False) -> bool:
         desired_day = self.target_day_mode(now)
@@ -130,6 +163,83 @@ _ir_cut_controller = IRCutController(
     mode=IR_CUT_MODE,
     min_switch_interval_s=IR_CUT_MIN_SWITCH_INTERVAL_S,
 )
+
+
+def get_ir_status_snapshot(now: datetime.datetime | None = None) -> dict:
+    """Return a serializable IR/day-night status snapshot for logs and metadata."""
+    dt = _ir_now(now)
+    desired_day = _ir_cut_controller.target_day_mode(dt)
+    ir_hw_enabled = IR_CUT_PIN >= 0 and not MOCK and PICAMERA_AVAILABLE
+
+    return {
+        "timestamp_local": dt.isoformat(),
+        "timezone": IR_CUT_TIMEZONE if _IR_CUT_TZ is not None else "system-local",
+        "mode": _ir_cut_controller.mode,
+        "phase": "day" if desired_day else "night",
+        "desired_day_mode": desired_day,
+        "ir_cut_pin": IR_CUT_PIN,
+        "ir_cut_gpio_enabled": ir_hw_enabled,
+        "ir_pass_expected": (not desired_day) if ir_hw_enabled else None,
+        "ir_cut_filter_expected": "engaged" if desired_day else "open",
+    }
+
+
+def log_ir_status(prefix: str = "[CAMERA]") -> None:
+    snapshot = get_ir_status_snapshot()
+    print(
+        f"{prefix} IR status phase={snapshot['phase']} mode={snapshot['mode']} "
+        f"tz={snapshot['timezone']} ir_pass_expected={snapshot['ir_pass_expected']} "
+        f"pin={snapshot['ir_cut_pin']}"
+    )
+
+
+def _write_minimal_jpeg(path: str) -> None:
+    with open(path, 'wb') as f:
+        f.write(b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00'
+               b'\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c'
+               b'\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c'
+               b'\x1c $.\'" ,#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00'
+               b'\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01'
+               b'\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05'
+               b'\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04'
+               b'\x03\x05\x05\x04\x04\x00\x00\x01}\xff\xda\x00\x08\x01\x01\x00\x00?\x00'
+               b'\xd2\xcf \xff\xd9')
+
+
+def build_ir_status_image(path: str | None = None, now: datetime.datetime | None = None) -> str:
+    """Generate a status image describing day/night and IR expectations."""
+    if path is None:
+        ts = _ir_now(now).strftime("%Y%m%d_%H%M%S_%f")
+        path = os.path.join(tempfile.gettempdir(), f"ir_status_{ts}.jpg")
+
+    snapshot = get_ir_status_snapshot(now)
+
+    lines = [
+        "AGOS PRE-CAPTURE IR STATUS",
+        f"Local Time: {snapshot['timestamp_local']}",
+        f"Timezone: {snapshot['timezone']}",
+        f"Phase: {snapshot['phase'].upper()}",
+        f"IR Mode: {snapshot['mode']}",
+        f"IR-CUT GPIO Enabled: {snapshot['ir_cut_gpio_enabled']}",
+        f"IR Pass Expected: {snapshot['ir_pass_expected']}",
+        f"IR-CUT Filter: {snapshot['ir_cut_filter_expected']}",
+    ]
+
+    try:
+        from PIL import Image, ImageDraw
+
+        img = Image.new("RGB", (960, 540), color=(24, 27, 35))
+        draw = ImageDraw.Draw(img)
+        y = 24
+        for idx, line in enumerate(lines):
+            color = (255, 255, 255) if idx else (113, 201, 255)
+            draw.text((24, y), line, fill=color)
+            y += 56 if idx == 0 else 48
+        img.save(path)
+    except Exception:
+        _write_minimal_jpeg(path)
+
+    return path
 
 
 def _log_runtime_scaler_crop(cam) -> None:
@@ -211,7 +321,7 @@ def capture_image(path=None):
         
         # Option 3: Generate a blank test image with PIL
         try:
-            from PIL import Image, ImageDraw, ImageFont
+            from PIL import Image, ImageDraw
             import datetime
             img = Image.new('RGB', (640, 480), color=(73, 109, 137))
             draw = ImageDraw.Draw(img)
@@ -222,24 +332,14 @@ def capture_image(path=None):
             return path
         except ImportError:
             print("[MOCK] PIL not available, creating minimal blank image")
-            # Fallback: create a minimal valid JPEG
-            with open(path, 'wb') as f:
-                # Minimal 1x1 JPEG header
-                f.write(b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00'
-                       b'\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c'
-                       b'\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c'
-                       b'\x1c $.\'" ,#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00'
-                       b'\x01\x00\x01\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01'
-                       b'\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05'
-                       b'\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04'
-                       b'\x03\x05\x05\x04\x04\x00\x00\x01}\xff\xda\x00\x08\x01\x01\x00\x00?\x00'
-                       b'\xd2\xcf \xff\xd9')
+            _write_minimal_jpeg(path)
             print(f"[MOCK] Created minimal test image: {path}")
             return path
     
     import time
     cam = None
     try:
+        log_ir_status()
         _ir_cut_controller.maybe_apply(force=True)
         cam = Picamera2()
         # Configure for high-quality stills at target resolution.
@@ -327,6 +427,7 @@ class PersistentCamera:
             path = os.path.join(tempfile.gettempdir(), f"frame_{ts}.jpg")
         if MOCK or not PICAMERA_AVAILABLE or self._cam is None:
             return capture_image(path)  # use mock path
+        log_ir_status()
         _ir_cut_controller.maybe_apply()
         self._cam.capture_file(path)
         return path
