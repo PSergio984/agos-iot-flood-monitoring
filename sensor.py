@@ -8,6 +8,8 @@ from config import (
     LED_WARNING_ENABLED,
     LED_WARNING_PIN,
     LED_WARNING_THRESHOLD_CM,
+    SENSOR_ECHO_PIN,
+    SENSOR_TRIG_PIN,
 )
 
 # Check if we're explicitly in mock mode or if RPi.GPIO is unavailable
@@ -28,8 +30,8 @@ except (ImportError, ModuleNotFoundError, RuntimeError) as e:
     MOCK = True
     print("[GPIO] RPi.GPIO not available - running in MOCK mode")
 
-TRIG = 23
-ECHO = 24
+TRIG = SENSOR_TRIG_PIN
+ECHO = SENSOR_ECHO_PIN
 TIMEOUT = 0.3  # 300ms timeout (covers up to ~4m range + margins)
 MAX_RETRIES = 3  # Retry count before giving up
 
@@ -131,7 +133,7 @@ def get_water_level():
                 if time.monotonic() - timeout_start > TIMEOUT:
                     raise TimeoutError(
                         f"Timeout waiting for echo HIGH (attempt {attempt}/{MAX_RETRIES}). "
-                        "Check: TRIG→GPIO23, ECHO→GPIO24, VCC→3.3V (or 5V w/ voltage divider)."
+                        f"Check: TRIG→GPIO{TRIG}, ECHO→GPIO{ECHO}, VCC→3.3V (or 5V w/ voltage divider)."
                     )
             pulse_start = time.monotonic()  # Captured after ECHO went HIGH
 

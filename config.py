@@ -30,6 +30,10 @@ SENSOR_POST_ENABLED = os.getenv("SENSOR_POST_ENABLED", "true").lower() == "true"
 SENSOR_INTERVAL = float(os.getenv("SENSOR_INTERVAL", "1.0"))   # seconds
 CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps)
 
+# ── Sensor GPIO mapping (BCM numbering) ───────────────────────────────────
+SENSOR_TRIG_PIN = int(os.getenv("SENSOR_TRIG_PIN", "23"))
+SENSOR_ECHO_PIN = int(os.getenv("SENSOR_ECHO_PIN", "24"))
+
 # ── Local warning LED (optional) ────────────────────────────────────────────
 LED_WARNING_ENABLED = os.getenv("LED_WARNING_ENABLED", "false").lower() == "true"
 LED_WARNING_PIN = int(os.getenv("LED_WARNING_PIN", "18"))
