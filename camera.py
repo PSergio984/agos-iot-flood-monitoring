@@ -25,6 +25,7 @@ CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
 CAMERA_EXPOSURE_TIME     = int(os.getenv("CAMERA_EXPOSURE_TIME", "0"))    # µs; 0 = auto
 CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", "0"))  # 0 = auto
 CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
+CAMERA_EXPOSURE_VALUE    = float(os.getenv("CAMERA_EXPOSURE_VALUE", "0.0"))  # EV compensation
 
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
@@ -327,8 +328,13 @@ def _build_quality_controls():
     if CAMERA_EXPOSURE_TIME > 0:
         controls["ExposureTime"] = CAMERA_EXPOSURE_TIME
         controls["AeEnable"] = False
-    elif CAMERA_FRAME_DURATION_MAX > 0:
-        controls["FrameDurationLimits"] = (33333, CAMERA_FRAME_DURATION_MAX)
+    else:
+        # Auto-exposure active: apply compensation and limits
+        if CAMERA_EXPOSURE_VALUE != 0.0:
+            controls["ExposureValue"] = CAMERA_EXPOSURE_VALUE
+        if CAMERA_FRAME_DURATION_MAX > 0:
+            controls["FrameDurationLimits"] = (33333, CAMERA_FRAME_DURATION_MAX)
+
 
     if CAMERA_ANALOGUE_GAIN > 0:
         controls["AnalogueGain"] = CAMERA_ANALOGUE_GAIN
