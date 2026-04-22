@@ -27,6 +27,14 @@ CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", "0"))  # 0 = 
 CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
 CAMERA_EXPOSURE_VALUE    = float(os.getenv("CAMERA_EXPOSURE_VALUE", "0.0"))  # EV compensation
 
+# Post-capture Software Cropping
+IMAGE_CROP_ENABLED = os.getenv("IMAGE_CROP_ENABLED", "false").lower() == "true"
+IMAGE_CROP_X       = int(os.getenv("IMAGE_CROP_X", "518"))
+IMAGE_CROP_Y       = int(os.getenv("IMAGE_CROP_Y", "777"))
+IMAGE_CROP_WIDTH   = int(os.getenv("IMAGE_CROP_WIDTH", "1555"))
+IMAGE_CROP_HEIGHT  = int(os.getenv("IMAGE_CROP_HEIGHT", "972"))
+
+
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
 IR_CUT_MODE = os.getenv("IR_CUT_MODE", "auto").strip().lower()
@@ -342,6 +350,35 @@ def _build_quality_controls():
     return controls
 
 
+def _apply_software_crop(path):
+    """Crop the saved image to the defined Region of Interest (ROI) if enabled."""
+    if not IMAGE_CROP_ENABLED or not os.path.exists(path):
+        return
+    try:
+        import cv2
+        img = cv2.imread(path)
+        if img is None:
+            return
+        
+        # Ensure crop coordinates are within image bounds
+        h, w = img.shape[:2]
+        x1 = max(0, min(IMAGE_CROP_X, w - 1))
+        y1 = max(0, min(IMAGE_CROP_Y, h - 1))
+        x2 = max(0, min(x1 + IMAGE_CROP_WIDTH, w))
+        y2 = max(0, min(y1 + IMAGE_CROP_HEIGHT, h))
+        
+        # Only crop if the region is valid
+        if x2 > x1 and y2 > y1:
+            cropped = img[y1:y2, x1:x2]
+            cv2.imwrite(path, cropped, [int(cv2.IMWRITE_JPEG_QUALITY), CAMERA_JPEG_QUALITY])
+            # print(f"[CAMERA] Cropped image to {x2-x1}x{y2-y1} (ROI: x={x1}, y={y1})")
+    except ImportError:
+        print("[CAMERA] Warning: cv2 not installed, software crop skipped.")
+    except Exception as e:
+        print(f"[CAMERA] Warning: Failed to apply software crop: {e}")
+
+
+
 def capture_image(path=None):
     # Use cross-platform temporary directory if path not specified
     if path is None:
@@ -407,6 +444,7 @@ def capture_image(path=None):
         time.sleep(2)  # Allow AEC/AWB to converge on the correct crop region
         _log_runtime_scaler_crop(cam)
         cam.capture_file(path)
+        _apply_software_crop(path)
         print(f"[CAMERA] Captured {CAMERA_WIDTH}×{CAMERA_HEIGHT} image: {path}")
         return path
     finally:
@@ -473,6 +511,7 @@ class PersistentCamera:
         log_ir_status()
         _ir_cut_controller.maybe_apply()
         self._cam.capture_file(path)
+        _apply_software_crop(path)
         return path
 
     def stop(self):
