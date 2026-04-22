@@ -57,6 +57,7 @@ cloudinary.config(
 
 # ── Import project camera (Picamera2 / mock) ────────────────────────────────
 from camera import PersistentCamera
+from frame_quality import get_frame_quality_metrics, are_metrics_usable
 
 # ── Constants ────────────────────────────────────────────────────────────────
 LABELS = ["blocked", "partial", "clear", "flooded"]
@@ -194,6 +195,17 @@ def run(label, folder, do_upload):
             # Save local backup
             local_path = save_local_backup(cap_path, label)
             print(f"  [OK]   Saved locally: {local_path}")
+
+            # Show quality metrics so user knows if image is good for training
+            metrics = get_frame_quality_metrics(local_path)
+            if metrics:
+                usable = are_metrics_usable(metrics)
+                status = "\u2713 GOOD" if usable else "\u2717 LOW QUALITY"
+                print(f"  [QA]   {status}  brightness={metrics['brightness']:.1f}  "
+                      f"contrast={metrics['contrast_stddev']:.1f}  "
+                      f"sharpness={metrics['laplacian_var']:.1f}")
+                if not usable:
+                    print(f"  [QA]   \u26a0 Image may be too dark/blurry — consider retaking")
 
             # Upload to Cloudinary
             if do_upload:

@@ -16,6 +16,16 @@ CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
 CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
 CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() == "true"
 
+# ── Image quality settings ───────────────────────────────────────────────────
+CAMERA_JPEG_QUALITY      = int(os.getenv("CAMERA_JPEG_QUALITY", "95"))
+CAMERA_TUNING_FILE       = os.getenv("CAMERA_TUNING_FILE", "").strip()
+CAMERA_SHARPNESS         = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
+CAMERA_CONTRAST          = float(os.getenv("CAMERA_CONTRAST", "1.0"))
+CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
+CAMERA_EXPOSURE_TIME     = int(os.getenv("CAMERA_EXPOSURE_TIME", "0"))    # µs; 0 = auto
+CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", "0"))  # 0 = auto
+CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
+
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
 IR_CUT_MODE = os.getenv("IR_CUT_MODE", "auto").strip().lower()
@@ -287,6 +297,45 @@ def set_ir_cut_mode(day: bool) -> None:
         print(f"[CAMERA] IR-CUT GPIO error: {e}")
 
 
+
+def _create_camera():
+    """Create Picamera2 instance with optional tuning file and JPEG quality."""
+    tuning = None
+    if CAMERA_TUNING_FILE:
+        try:
+            tuning = Picamera2.load_tuning_file(CAMERA_TUNING_FILE)
+            print(f"[CAMERA] Loaded tuning file: {CAMERA_TUNING_FILE}")
+        except Exception as e:
+            print(f"[CAMERA] Failed to load tuning '{CAMERA_TUNING_FILE}': {e}")
+    cam = Picamera2(tuning=tuning) if tuning else Picamera2()
+    cam.options["quality"] = CAMERA_JPEG_QUALITY
+    return cam
+
+
+def _build_quality_controls():
+    """Build controls dict with ScalerCrop, image quality, and exposure settings."""
+    controls = {}
+    if CAMERA_NO_CROP:
+        controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
+
+    # Image quality enhancements
+    controls["Sharpness"] = CAMERA_SHARPNESS
+    controls["Contrast"] = CAMERA_CONTRAST
+    controls["Saturation"] = CAMERA_SATURATION
+
+    # Exposure: manual override or extended auto-exposure range
+    if CAMERA_EXPOSURE_TIME > 0:
+        controls["ExposureTime"] = CAMERA_EXPOSURE_TIME
+        controls["AeEnable"] = False
+    elif CAMERA_FRAME_DURATION_MAX > 0:
+        controls["FrameDurationLimits"] = (33333, CAMERA_FRAME_DURATION_MAX)
+
+    if CAMERA_ANALOGUE_GAIN > 0:
+        controls["AnalogueGain"] = CAMERA_ANALOGUE_GAIN
+
+    return controls
+
+
 def capture_image(path=None):
     # Use cross-platform temporary directory if path not specified
     if path is None:
@@ -341,17 +390,10 @@ def capture_image(path=None):
     try:
         log_ir_status()
         _ir_cut_controller.maybe_apply(force=True)
-        cam = Picamera2()
-        # Configure for high-quality stills at target resolution.
-        # create_still_configuration() overrides the default 640×480 preview mode.
-        # ScalerCrop is baked into the config so AEC/AWB converges on the
-        # correct sensor region from the very first frame.
-        controls = {}
-        if CAMERA_NO_CROP:
-            controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
+        cam = _create_camera()
         config = cam.create_still_configuration(
             main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
-            controls=controls,
+            controls=_build_quality_controls(),
             buffer_count=1,
         )
         cam.configure(config)
@@ -398,15 +440,10 @@ class PersistentCamera:
             self.stop()  # Close existing camera before re-opening
         import time
         _ir_cut_controller.maybe_apply(force=True)
-        self._cam = Picamera2()
-        # ScalerCrop baked into config so AEC/AWB converges on the correct
-        # sensor region from the very first frame.
-        controls = {}
-        if CAMERA_NO_CROP:
-            controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
+        self._cam = _create_camera()
         config = self._cam.create_still_configuration(
             main={"size": (CAMERA_WIDTH, CAMERA_HEIGHT)},
-            controls=controls,
+            controls=_build_quality_controls(),
             buffer_count=1,
         )
         self._cam.configure(config)
