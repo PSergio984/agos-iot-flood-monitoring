@@ -26,7 +26,8 @@ CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
 CAMERA_EXPOSURE_TIME     = int(os.getenv("CAMERA_EXPOSURE_TIME", "0"))    # µs; 0 = auto
 CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", "0"))  # 0 = auto
 CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
-CAMERA_EXPOSURE_VALUE    = float(os.getenv("CAMERA_EXPOSURE_VALUE", "0.0"))  # EV compensation
+CAMERA_EXPOSURE_VALUE_DAY   = float(os.getenv("CAMERA_EXPOSURE_VALUE_DAY", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
+CAMERA_EXPOSURE_VALUE_NIGHT = float(os.getenv("CAMERA_EXPOSURE_VALUE_NIGHT", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
 
 # Post-capture Software Cropping
 IMAGE_CROP_ENABLED = os.getenv("IMAGE_CROP_ENABLED", "false").lower() == "true"
@@ -344,8 +345,10 @@ def _build_quality_controls():
         controls["AeEnable"] = False
     else:
         # Auto-exposure active: apply compensation and limits
-        if CAMERA_EXPOSURE_VALUE != 0.0:
-            controls["ExposureValue"] = CAMERA_EXPOSURE_VALUE
+        dt = _ir_now()
+        is_day = _ir_cut_controller.target_day_mode(dt)
+        exposure_val = CAMERA_EXPOSURE_VALUE_DAY if is_day else CAMERA_EXPOSURE_VALUE_NIGHT
+        controls["ExposureValue"] = exposure_val
         if CAMERA_FRAME_DURATION_MAX > 0:
             controls["FrameDurationLimits"] = (33333, CAMERA_FRAME_DURATION_MAX)
 
