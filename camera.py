@@ -18,7 +18,8 @@ CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() ==
 
 # ── Image quality settings ───────────────────────────────────────────────────
 CAMERA_JPEG_QUALITY      = int(os.getenv("CAMERA_JPEG_QUALITY", "95"))
-CAMERA_TUNING_FILE       = os.getenv("CAMERA_TUNING_FILE", "").strip()
+CAMERA_TUNING_FILE_DAY   = os.getenv("CAMERA_TUNING_FILE_DAY", os.getenv("CAMERA_TUNING_FILE", "")).strip()
+CAMERA_TUNING_FILE_NIGHT = os.getenv("CAMERA_TUNING_FILE_NIGHT", os.getenv("CAMERA_TUNING_FILE", "")).strip()
 CAMERA_SHARPNESS         = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
 CAMERA_CONTRAST          = float(os.getenv("CAMERA_CONTRAST", "1.0"))
 CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
@@ -309,13 +310,18 @@ def set_ir_cut_mode(day: bool) -> None:
 
 def _create_camera():
     """Create Picamera2 instance with optional tuning file and JPEG quality."""
+    # Check if we should use day or night mode tuning
+    dt = _ir_now()
+    is_day = _ir_cut_controller.target_day_mode(dt)
+    tuning_file = CAMERA_TUNING_FILE_DAY if is_day else CAMERA_TUNING_FILE_NIGHT
+
     tuning = None
-    if CAMERA_TUNING_FILE:
+    if tuning_file:
         try:
-            tuning = Picamera2.load_tuning_file(CAMERA_TUNING_FILE)
-            print(f"[CAMERA] Loaded tuning file: {CAMERA_TUNING_FILE}")
+            tuning = Picamera2.load_tuning_file(tuning_file)
+            print(f"[CAMERA] Loaded tuning file: {tuning_file}")
         except Exception as e:
-            print(f"[CAMERA] Failed to load tuning '{CAMERA_TUNING_FILE}': {e}")
+            print(f"[CAMERA] Failed to load tuning '{tuning_file}': {e}")
     cam = Picamera2(tuning=tuning) if tuning else Picamera2()
     cam.options["quality"] = CAMERA_JPEG_QUALITY
     return cam
