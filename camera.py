@@ -406,21 +406,17 @@ def _apply_clahe_night(path):
         if img is None:
             return
             
-        # Convert to LAB color space
-        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
+        # Convert to Grayscale (removes the pink IR tint)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # Apply CLAHE to L-channel (Lightness)
+        # Apply CLAHE to enhance contrast and pull details out of shadows
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        cl = clahe.apply(l)
+        enhanced_gray = clahe.apply(gray)
         
-        # Merge the CLAHE enhanced L-channel with the original A and B channels
-        limg = cv2.merge((cl,a,b))
+        # Convert back to BGR (3 channels) so YOLOv8 doesn't crash expecting a 3D tensor
+        enhanced_img = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
         
-        # Convert back to BGR color space
-        enhanced_img = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-        
-        # Save the enhanced image
+        # Save the enhanced grayscale image
         cv2.imwrite(path, enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), CAMERA_JPEG_QUALITY])
         # print("[CAMERA] Applied CLAHE night vision enhancement")
     except ImportError:
