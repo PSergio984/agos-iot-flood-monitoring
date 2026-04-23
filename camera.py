@@ -36,6 +36,9 @@ IMAGE_CROP_Y       = int(os.getenv("IMAGE_CROP_Y", "777"))
 IMAGE_CROP_WIDTH   = int(os.getenv("IMAGE_CROP_WIDTH", "1555"))
 IMAGE_CROP_HEIGHT  = int(os.getenv("IMAGE_CROP_HEIGHT", "972"))
 
+# Post-capture Software Enhancements
+IMAGE_CLAHE_NIGHT_ENABLED = os.getenv("IMAGE_CLAHE_NIGHT_ENABLED", "true").lower() == "true"
+
 
 
 IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
@@ -386,6 +389,44 @@ def _apply_software_crop(path):
     except Exception as e:
         print(f"[CAMERA] Warning: Failed to apply software crop: {e}")
 
+def _apply_clahe_night(path):
+    """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) for better night vision visibility."""
+    if not IMAGE_CLAHE_NIGHT_ENABLED or not os.path.exists(path):
+        return
+    
+    # Only apply at night
+    dt = _ir_now()
+    is_day = _ir_cut_controller.target_day_mode(dt)
+    if is_day:
+        return
+        
+    try:
+        import cv2
+        img = cv2.imread(path)
+        if img is None:
+            return
+            
+        # Convert to LAB color space
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        
+        # Apply CLAHE to L-channel (Lightness)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        cl = clahe.apply(l)
+        
+        # Merge the CLAHE enhanced L-channel with the original A and B channels
+        limg = cv2.merge((cl,a,b))
+        
+        # Convert back to BGR color space
+        enhanced_img = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+        
+        # Save the enhanced image
+        cv2.imwrite(path, enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), CAMERA_JPEG_QUALITY])
+        # print("[CAMERA] Applied CLAHE night vision enhancement")
+    except ImportError:
+        print("[CAMERA] Warning: cv2 not installed, CLAHE enhancement skipped.")
+    except Exception as e:
+        print(f"[CAMERA] Warning: Failed to apply CLAHE enhancement: {e}")
 
 
 def capture_image(path=None):
@@ -454,6 +495,7 @@ def capture_image(path=None):
         _log_runtime_scaler_crop(cam)
         cam.capture_file(path)
         _apply_software_crop(path)
+        _apply_clahe_night(path)
         print(f"[CAMERA] Captured {CAMERA_WIDTH}×{CAMERA_HEIGHT} image: {path}")
         return path
     finally:
@@ -521,6 +563,7 @@ class PersistentCamera:
         _ir_cut_controller.maybe_apply()
         self._cam.capture_file(path)
         _apply_software_crop(path)
+        _apply_clahe_night(path)
         return path
 
     def stop(self):
