@@ -311,6 +311,18 @@ def set_ir_cut_mode(day: bool) -> None:
         print(f"[CAMERA] IR-CUT GPIO error: {e}")
 
 
+def force_night_vision() -> None:
+    """Force GPIO 17 LOW to activate IR/night vision regardless of time-of-day.
+
+    Called by the environment sensing logic in main.py when a frame is
+    detected as too dark or obscured.  Delegates to the existing
+    set_ir_cut_mode() and updates the IRCutController state so the
+    anti-flap timer is respected.
+    """
+    set_ir_cut_mode(day=False)
+    _ir_cut_controller.mark_applied(desired_day=False)
+
+
 
 def _create_camera():
     """Create Picamera2 instance with optional tuning file and JPEG quality."""

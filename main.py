@@ -30,10 +30,13 @@ from config import (
     SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
+    RISK_SCORE_API_URL,
+    RISK_SCORE_POLL_INTERVAL,
+    RISK_LED_ENABLED,
 )
-from camera import PersistentCamera, build_ir_status_image, get_ir_status_snapshot
-from frame_quality import get_frame_quality_metrics, is_frame_usable
-from sensor import get_water_level, update_warning_led
+from camera import PersistentCamera, build_ir_status_image, get_ir_status_snapshot, force_night_vision
+from frame_quality import get_frame_quality_metrics, is_frame_usable, is_frame_dark, is_frame_obscured
+from sensor import get_water_level, update_warning_led, update_risk_led, water_level_to_risk_score
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
 
@@ -241,6 +244,10 @@ def sensor_loop():
                     )
                 else:
                     update_warning_led(filtered_level)
+                    # Also drive the RGB LED via water-level fallback
+                    risk_score = water_level_to_risk_score(filtered_level)
+                    if risk_score is not None:
+                        update_risk_led(risk_score)
                     logger.info(
                         f"[SENSOR] Local reading raw={level}cm filtered={filtered_level:.2f}cm "
                         f"device={SENSOR_DEVICE_ID} filter={filter_status}"
@@ -315,8 +322,17 @@ def camera_loop():
                 if path is None:
                     logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
                 else:
+                    # ── Environment sensing (reuses existing quality metrics) ──
+                    metrics = get_frame_quality_metrics(str(path))
+                    if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
+                        force_night_vision()
+                        logger.info(
+                            f"[CAMERA] Environment dark/obscured — activated night vision "
+                            f"(brightness={metrics['brightness']:.1f} contrast={metrics['contrast_stddev']:.1f} "
+                            f"laplacian={metrics['laplacian_var']:.1f})"
+                        )
+
                     if not is_frame_usable(str(path)):
-                        metrics = get_frame_quality_metrics(str(path))
                         logger.warning(
                             f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
                         )
@@ -354,8 +370,18 @@ def camera_loop():
                 try:
                     _send_precapture_status_image()
                     path = cam.capture()
+
+                    # ── Environment sensing (reuses existing quality metrics) ──
+                    metrics = get_frame_quality_metrics(path)
+                    if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
+                        force_night_vision()
+                        logger.info(
+                            f"[CAMERA] Environment dark/obscured — activated night vision "
+                            f"(brightness={metrics['brightness']:.1f} contrast={metrics['contrast_stddev']:.1f} "
+                            f"laplacian={metrics['laplacian_var']:.1f})"
+                        )
+
                     if not is_frame_usable(path):
-                        metrics = get_frame_quality_metrics(path)
                         logger.warning(
                             f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
                         )
@@ -393,22 +419,77 @@ def camera_loop():
                 stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
 
 
+def risk_led_loop():
+    """Poll the Fusion & Decision Engine API for combined risk score.
+
+    Updates the RGB LED according to REQ-22.1/22.2/22.3.
+    When the API is unreachable or not configured, the sensor_loop
+    drives the LED via the water-level fallback instead.
+    """
+    if not RISK_SCORE_API_URL:
+        logger.info(
+            "[LED] RISK_SCORE_API_URL not configured — "
+            "RGB LED will be driven by water-level fallback in sensor_loop"
+        )
+        return  # Nothing to poll; sensor_loop handles the LED.
+
+    logger.info(
+        f"[LED] Risk LED loop started — polling {RISK_SCORE_API_URL} "
+        f"every {RISK_SCORE_POLL_INTERVAL}s"
+    )
+    headers = {}
+    if IOT_API_KEY:
+        headers["x-api-key"] = IOT_API_KEY
+
+    while not stop_event.is_set():
+        try:
+            response = requests.get(
+                RISK_SCORE_API_URL, headers=headers, timeout=5
+            )
+            response.raise_for_status()
+            data = response.json()
+            score = data.get("combined_risk_score")
+            if score is not None:
+                update_risk_led(score)
+                logger.debug(f"[LED] API risk score={score}")
+            else:
+                logger.warning(
+                    "[LED] API response missing 'combined_risk_score' key"
+                )
+        except requests.exceptions.Timeout:
+            logger.warning(
+                "[LED] Risk score API timed out — holding last LED state"
+            )
+        except requests.exceptions.RequestException as e:
+            logger.warning(
+                f"[LED] Risk score API error: {e} — holding last LED state"
+            )
+        except Exception as e:
+            logger.error(f"[LED] Unexpected error in risk LED loop: {e}")
+
+        stop_event.wait(RISK_SCORE_POLL_INTERVAL)
+
+
 if __name__ == "__main__":
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
     sensor_thread = threading.Thread(target=sensor_loop, name="sensor", daemon=True)
     camera_thread = threading.Thread(target=camera_loop, name="camera", daemon=True)
+    risk_led_thread = threading.Thread(target=risk_led_loop, name="risk_led", daemon=True)
 
     logger.info(
         f"AGOS starting — sensor={SENSOR_INTERVAL}s interval, "
         f"camera={CAMERA_INTERVAL}s interval "
-        f"({f'{1 / CAMERA_INTERVAL:.1f}' if CAMERA_INTERVAL else '∞'} fps)"
+        f"({f'{1 / CAMERA_INTERVAL:.1f}' if CAMERA_INTERVAL else '∞'} fps), "
+        f"RISK_LED={'API' if RISK_SCORE_API_URL else 'water-level fallback'}"
     )
     sensor_thread.start()
     camera_thread.start()
+    risk_led_thread.start()
 
-    # Block the main thread until both workers exit after stop_event is set.
+    # Block the main thread until all workers exit after stop_event is set.
     sensor_thread.join()
     camera_thread.join()
+    risk_led_thread.join()
     logger.info("AGOS stopped.")

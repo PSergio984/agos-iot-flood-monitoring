@@ -65,3 +65,24 @@ FRAME_QUALITY_MAX_BRIGHTNESS = float(os.getenv("FRAME_QUALITY_MAX_BRIGHTNESS", "
 FRAME_QUALITY_MIN_CONTRAST_STDDEV = float(os.getenv("FRAME_QUALITY_MIN_CONTRAST_STDDEV", "25.0"))
 FRAME_QUALITY_MIN_LAPLACIAN_VAR = float(os.getenv("FRAME_QUALITY_MIN_LAPLACIAN_VAR", "100.0"))
 FRAME_QUALITY_RESIZE_WIDTH = int(os.getenv("FRAME_QUALITY_RESIZE_WIDTH", "320"))
+
+# ── Risk Indicator LEDs (Fusion Engine / water-level fallback) ─────────────
+RISK_LED_ENABLED = os.getenv("RISK_LED_ENABLED", "true").lower() == "true"
+RISK_LED_RED_PIN = int(os.getenv("RISK_LED_RED_PIN", "14"))
+RISK_LED_YELLOW_PIN = int(os.getenv("RISK_LED_YELLOW_PIN", "18"))
+RISK_LED_GREEN_PIN = int(os.getenv("RISK_LED_GREEN_PIN", "15"))
+
+# Fusion & Decision Engine API (leave blank to use water-level fallback only)
+RISK_SCORE_API_URL = os.getenv("RISK_SCORE_API_URL", "")
+RISK_SCORE_POLL_INTERVAL = float(os.getenv("RISK_SCORE_POLL_INTERVAL", "10.0"))
+
+# Water-level fallback thresholds (used when API is unreachable)
+# Distance in cm — lower distance = higher water level = more danger
+RISK_FALLBACK_SAFE_ABOVE_CM = float(os.getenv("RISK_FALLBACK_SAFE_ABOVE_CM", "50.0"))
+RISK_FALLBACK_WARNING_ABOVE_CM = float(os.getenv("RISK_FALLBACK_WARNING_ABOVE_CM", "30.0"))
+# Below WARNING threshold = Danger (red)
+
+# ── Environment Sensing (Auto Night Vision) ────────────────────────────────
+ENV_SENSE_DARKNESS_THRESHOLD = float(os.getenv("ENV_SENSE_DARKNESS_THRESHOLD", "40.0"))
+ENV_SENSE_OBSCURED_CONTRAST_MAX = float(os.getenv("ENV_SENSE_OBSCURED_CONTRAST_MAX", "10.0"))
+ENV_SENSE_OBSCURED_LAPLACIAN_MAX = float(os.getenv("ENV_SENSE_OBSCURED_LAPLACIAN_MAX", "50.0"))

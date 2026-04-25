@@ -7,6 +7,9 @@ from config import (
     FRAME_QUALITY_MIN_CONTRAST_STDDEV,
     FRAME_QUALITY_MIN_LAPLACIAN_VAR,
     FRAME_QUALITY_RESIZE_WIDTH,
+    ENV_SENSE_DARKNESS_THRESHOLD,
+    ENV_SENSE_OBSCURED_CONTRAST_MAX,
+    ENV_SENSE_OBSCURED_LAPLACIAN_MAX,
 )
 
 try:
@@ -90,3 +93,31 @@ def is_frame_usable(image_path):
 
     metrics = get_frame_quality_metrics(image_path)
     return are_metrics_usable(metrics)
+
+
+def is_frame_dark(metrics):
+    """Return True if the frame brightness falls below the darkness threshold.
+
+    Indicates the environment is too dark for useful daytime capture —
+    the caller should activate night vision (GPIO 17 LOW).
+    Reuses already-computed metrics; zero additional OpenCV cost.
+    """
+    if metrics is None:
+        return False
+    return float(metrics["brightness"]) < ENV_SENSE_DARKNESS_THRESHOLD
+
+
+def is_frame_obscured(metrics):
+    """Return True if the frame has extremely low contrast AND low sharpness.
+
+    This pattern indicates the lens is physically blocked or heavily
+    obscured (e.g. mud, condensation, tape).  A normal dark scene still
+    has *some* texture; a blocked lens produces a nearly uniform image.
+    Reuses already-computed metrics; zero additional OpenCV cost.
+    """
+    if metrics is None:
+        return False
+    return (
+        float(metrics["contrast_stddev"]) < ENV_SENSE_OBSCURED_CONTRAST_MAX
+        and float(metrics["laplacian_var"]) < ENV_SENSE_OBSCURED_LAPLACIAN_MAX
+    )
