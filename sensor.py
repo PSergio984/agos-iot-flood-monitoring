@@ -1,10 +1,16 @@
 import os
 import time
 import random
+import statistics
 
 from config import (
     SENSOR_ECHO_PIN,
     SENSOR_TRIG_PIN,
+    SENSOR_TIMEOUT_S,
+    SENSOR_BURST_SAMPLES,
+    SENSOR_BURST_MIN_VALID,
+    SENSOR_BURST_SAMPLE_DELAY_S,
+    SENSOR_TEMPERATURE_C,
     RISK_LED_BLOCKED_PIN,
     RISK_LED_PARTIAL_BLOCKED_PIN,
     RISK_LED_CLEAR_PIN,
@@ -21,18 +27,19 @@ GPIO_AVAILABLE = False
 # Try to import RPi.GPIO - if it fails, automatically enable mock mode
 try:
     if not MOCK:
-        import RPi.GPIO as GPIO
+        import RPi.GPIO as GPIO  # type: ignore[import-not-found]
         GPIO_AVAILABLE = True
+
         print("[GPIO] RPi.GPIO module loaded successfully")
     else:
         print("[GPIO] MOCK_MODE enabled - running in MOCK mode")
-except (ImportError, ModuleNotFoundError, RuntimeError) as e:
+except (ImportError, ModuleNotFoundError, RuntimeError):
     MOCK = True
     print("[GPIO] RPi.GPIO not available - running in MOCK mode")
 
 TRIG = SENSOR_TRIG_PIN
 ECHO = SENSOR_ECHO_PIN
-TIMEOUT = 0.3  # 300ms timeout (covers up to ~4m range + margins)
+TIMEOUT = float(SENSOR_TIMEOUT_S)
 MAX_RETRIES = 3  # Retry count before giving up
 
 # Initialize GPIO once at module level (only if not in mock mode)
@@ -53,11 +60,30 @@ def _configured_risk_led_pins():
             pins.append(pin)
     return pins
 
+
+def _speed_of_sound_cm_s(temp_c):
+    """Return the speed of sound in air in cm/s for a Celsius temperature.
+
+    Uses the standard approximation:
+        v = 331.4 + 0.606 * T
+    where v is in m/s and T is temperature in Celsius.
+
+    The fallback value 34300.0 cm/s corresponds to approximately 343.0 m/s,
+    which is the speed of sound at about 20°C.
+    """
+    if temp_c is None:
+        return 34300.0
+    return (331.4 + (0.606 * temp_c)) * 100.0
+
+
+def _pulse_duration_to_cm(pulse_duration_s, temp_c):
+    return (pulse_duration_s * _speed_of_sound_cm_s(temp_c)) / 2.0
+
 def _init_gpio():
     """Initialize GPIO pins once at module load."""
     global gpio_initialized
     if not gpio_initialized and GPIO_AVAILABLE and not MOCK:
-        import RPi.GPIO as GPIO
+        import RPi.GPIO as GPIO  # type: ignore[import-not-found]
         import atexit
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(TRIG, GPIO.OUT)
@@ -81,6 +107,55 @@ def _init_gpio():
         # Register cleanup to run at exit
         atexit.register(GPIO.cleanup)
         print("[GPIO] Initialized successfully")
+
+
+def _read_single_distance_cm():
+    """Read a single ultrasonic distance sample in cm.
+
+    Raises TimeoutError on echo timeouts.
+    Returns None for out-of-range readings.
+    """
+    import RPi.GPIO as GPIO  # type: ignore[import-not-found]
+
+    # Warn if ECHO is already HIGH — indicates a wiring or power problem.
+    # JSN-SR04 wiring notes:
+    #   3.3V mode: VCC→3.3V pin — ECHO outputs 3.3V, Pi-safe, no voltage divider needed.
+    #   5V mode  : VCC→5V pin  — ECHO outputs 5V; add a 1kΩ/2kΩ divider to protect GPIO.
+    if GPIO.input(ECHO) == 1:
+        print("[SENSOR] Warning: ECHO is HIGH before trigger. "
+              "Check wiring — if VCC is 5V, ECHO needs a 1kΩ/2kΩ voltage divider; "
+              "use 3.3V on VCC to avoid this.")
+
+    # Ensure the trigger pin is LOW long enough for the sensor cycle to settle
+    # before sending the 10µs trigger pulse. A microsecond-scale sleep is not
+    # reliable in Python; 60ms is a conservative delay for JSN-SR04 sensors.
+    GPIO.output(TRIG, False)
+    time.sleep(0.06)
+    GPIO.output(TRIG, True)
+    time.sleep(0.00001)  # 10 microseconds
+    GPIO.output(TRIG, False)
+
+    # Wait for ECHO to go HIGH (pulse start)
+    timeout_start = time.monotonic()
+    while GPIO.input(ECHO) == 0:
+        if time.monotonic() - timeout_start > TIMEOUT:
+            raise TimeoutError("Timeout waiting for echo HIGH")
+    pulse_start = time.monotonic()
+
+    # Wait for ECHO to go LOW (pulse end)
+    timeout_start = time.monotonic()
+    while GPIO.input(ECHO) == 1:
+        if time.monotonic() - timeout_start > TIMEOUT:
+            raise TimeoutError("Timeout waiting for echo LOW")
+    pulse_end = time.monotonic()
+
+    distance_cm = _pulse_duration_to_cm(pulse_end - pulse_start, SENSOR_TEMPERATURE_C)
+
+    # Sanity check: JSN-SR04 valid range is 20 cm – 600 cm
+    if not (20.0 <= distance_cm <= 600.0):
+        return None
+
+    return distance_cm
 
 
 def water_level_to_risk_score(distance_cm):
@@ -131,7 +206,7 @@ def update_risk_led(combined_risk_score):
     if tier == _risk_led_tier:
         return
 
-    import RPi.GPIO as GPIO
+    import RPi.GPIO as GPIO  # type: ignore[import-not-found]
 
     for pin in configured_pins:
         GPIO.output(pin, GPIO.LOW)
@@ -159,65 +234,33 @@ def get_water_level():
         print(f"[MOCK] Generated water level: {mock_level} cm")
         return mock_level
     
-    # Real hardware implementation
-    import RPi.GPIO as GPIO
+    min_valid = min(SENSOR_BURST_MIN_VALID, SENSOR_BURST_SAMPLES)
 
     for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            # Ensure trigger is low; JSN-SR04 needs ~60ms minimum cycle time
-            GPIO.output(TRIG, False)
-            time.sleep(0.06)  # 60ms settle (full JSN-SR04 cycle time)
-            # Warn if ECHO is already HIGH — indicates a wiring or power problem.
-            # JSN-SR04 wiring notes:
-            #   3.3V mode: VCC→3.3V pin — ECHO outputs 3.3V, Pi-safe, no voltage divider needed.
-            #   5V mode  : VCC→5V pin  — ECHO outputs 5V; add a 1kΩ/2kΩ divider to protect GPIO.
-            if GPIO.input(ECHO) == 1:
-                print(f"[SENSOR] Warning (attempt {attempt}): ECHO is HIGH before trigger. "
-                      "Check wiring — if VCC is 5V, ECHO needs a 1kΩ/2kΩ voltage divider; "
-                      "use 3.3V on VCC to avoid this.")
+        samples = []
+        for sample_idx in range(SENSOR_BURST_SAMPLES):
+            try:
+                distance_cm = _read_single_distance_cm()
+                if distance_cm is not None:
+                    samples.append(distance_cm)
+            except TimeoutError as e:
+                print(f"[SENSOR] Timeout (burst {attempt} sample {sample_idx + 1}): {e}")
+            except Exception as e:
+                print(f"[SENSOR] Error (burst {attempt} sample {sample_idx + 1}): {e}")
 
-            # Send 10µs trigger pulse
-            GPIO.output(TRIG, True)
-            time.sleep(0.00001)  # 10 microseconds
-            GPIO.output(TRIG, False)
+            if sample_idx < SENSOR_BURST_SAMPLES - 1:
+                time.sleep(SENSOR_BURST_SAMPLE_DELAY_S)
 
-            # Wait for ECHO to go HIGH (pulse start)
-            timeout_start = time.monotonic()
-            while GPIO.input(ECHO) == 0:
-                if time.monotonic() - timeout_start > TIMEOUT:
-                    raise TimeoutError(
-                        f"Timeout waiting for echo HIGH (attempt {attempt}/{MAX_RETRIES}). "
-                        f"Check: TRIG→GPIO{TRIG}, ECHO→GPIO{ECHO}, VCC→3.3V (or 5V w/ voltage divider)."
-                    )
-            pulse_start = time.monotonic()  # Captured after ECHO went HIGH
+        if len(samples) >= min_valid:
+            median_value = statistics.median(samples)
+            return round(median_value, 2)
 
-            # Wait for ECHO to go LOW (pulse end)
-            timeout_start = time.monotonic()
-            while GPIO.input(ECHO) == 1:
-                if time.monotonic() - timeout_start > TIMEOUT:
-                    raise TimeoutError(
-                        f"Timeout waiting for echo LOW (attempt {attempt}/{MAX_RETRIES})."
-                    )
-            pulse_end = time.monotonic()  # Captured after ECHO went LOW
-
-            # Speed of sound ≈ 34300 cm/s, divide by 2 for round trip
-            distance_cm = ((pulse_end - pulse_start) * 34300) / 2
-
-            # Sanity check: JSN-SR04 valid range is 20 cm – 600 cm
-            if not (20.0 <= distance_cm <= 600.0):
-                print(f"[SENSOR] Out-of-range reading {distance_cm:.1f} cm on attempt {attempt}, retrying...")
-                continue
-
-            return round(distance_cm, 2)
-
-        except TimeoutError as e:
-            print(f"Error reading sensor: {e}")
-            if attempt < MAX_RETRIES:
-                time.sleep(0.1)
-        except Exception as e:
-            print(f"Error reading sensor (attempt {attempt}): {e}")
-            if attempt < MAX_RETRIES:
-                time.sleep(0.1)
+        print(
+            f"[SENSOR] Burst {attempt} insufficient valid readings "
+            f"(valid={len(samples)}/{SENSOR_BURST_SAMPLES}), retrying..."
+        )
+        if attempt < MAX_RETRIES:
+            time.sleep(0.1)
 
     print(f"[SENSOR] All {MAX_RETRIES} attempts failed. Returning None.")
     return None

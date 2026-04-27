@@ -4,6 +4,11 @@ import config
 def test_filter_config_types_and_basic_constraints():
     assert isinstance(config.SENSOR_FILTER_ENABLED, bool)
     assert isinstance(config.SENSOR_POST_ENABLED, bool)
+    assert isinstance(config.SENSOR_TIMEOUT_S, float)
+    assert isinstance(config.SENSOR_BURST_SAMPLES, int)
+    assert isinstance(config.SENSOR_BURST_MIN_VALID, int)
+    assert isinstance(config.SENSOR_BURST_SAMPLE_DELAY_S, float)
+    assert config.SENSOR_TEMPERATURE_C is None or isinstance(config.SENSOR_TEMPERATURE_C, float)
     assert isinstance(config.SENSOR_FILTER_WINDOW_SIZE, int)
     assert isinstance(config.SENSOR_FILTER_MIN_VALID_SAMPLES, int)
     assert isinstance(config.SENSOR_FILTER_MIN_CM, float)
@@ -16,6 +21,11 @@ def test_filter_config_types_and_basic_constraints():
     assert config.SENSOR_FILTER_WINDOW_SIZE >= 1
     assert config.SENSOR_FILTER_MIN_VALID_SAMPLES >= 1
     assert config.SENSOR_FILTER_MIN_VALID_SAMPLES <= config.SENSOR_FILTER_WINDOW_SIZE
+    assert config.SENSOR_TIMEOUT_S > 0
+    assert config.SENSOR_BURST_SAMPLES >= 1
+    assert config.SENSOR_BURST_MIN_VALID >= 1
+    assert config.SENSOR_BURST_MIN_VALID <= config.SENSOR_BURST_SAMPLES
+    assert config.SENSOR_BURST_SAMPLE_DELAY_S >= 0.06
     assert config.SENSOR_FILTER_MIN_CM >= 0
     assert config.SENSOR_FILTER_MAX_CM >= config.SENSOR_FILTER_MIN_CM
     assert config.SENSOR_FILTER_MODZ_THRESHOLD > 0

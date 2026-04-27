@@ -35,6 +35,19 @@ CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps
 SENSOR_TRIG_PIN = int(os.getenv("SENSOR_TRIG_PIN", "23"))
 SENSOR_ECHO_PIN = int(os.getenv("SENSOR_ECHO_PIN", "24"))
 
+# ── Sensor sampling and timing ────────────────────────────────────────────
+SENSOR_TIMEOUT_S = float(os.getenv("SENSOR_TIMEOUT_S", "0.3"))
+SENSOR_BURST_SAMPLES = max(1, int(os.getenv("SENSOR_BURST_SAMPLES", "7")))
+SENSOR_BURST_MIN_VALID = max(1, int(os.getenv("SENSOR_BURST_MIN_VALID", "3")))
+SENSOR_BURST_SAMPLE_DELAY_S = max(
+    0.06, float(os.getenv("SENSOR_BURST_SAMPLE_DELAY_S", "0.06"))
+)
+_temp_c_raw = os.getenv("SENSOR_TEMPERATURE_C", "").strip()
+try:
+    SENSOR_TEMPERATURE_C = float(_temp_c_raw) if _temp_c_raw else None
+except ValueError:
+    SENSOR_TEMPERATURE_C = None
+
 # ── Risk Indicator LEDs (unified, state-based naming) ──────────────────────
 # Use -1 to disable a specific state LED.
 # Backward compatibility: falls back to legacy color-based env vars when
