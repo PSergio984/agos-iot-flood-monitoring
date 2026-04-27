@@ -3,17 +3,11 @@ import time
 import random
 
 from config import (
-    LED_CLEAR_ENABLED,
-    LED_CLEAR_PIN,
-    LED_WARNING_ENABLED,
-    LED_WARNING_PIN,
-    LED_WARNING_THRESHOLD_CM,
     SENSOR_ECHO_PIN,
     SENSOR_TRIG_PIN,
-    RISK_LED_ENABLED,
-    RISK_LED_RED_PIN,
-    RISK_LED_YELLOW_PIN,
-    RISK_LED_GREEN_PIN,
+    RISK_LED_BLOCKED_PIN,
+    RISK_LED_PARTIAL_BLOCKED_PIN,
+    RISK_LED_CLEAR_PIN,
     RISK_FALLBACK_SAFE_ABOVE_CM,
     RISK_FALLBACK_WARNING_ABOVE_CM,
 )
@@ -43,9 +37,21 @@ MAX_RETRIES = 3  # Retry count before giving up
 
 # Initialize GPIO once at module level (only if not in mock mode)
 gpio_initialized = False
-_warning_led_state = None
-_clear_led_state = None
 _risk_led_tier = None  # Track current RGB LED tier to avoid redundant GPIO writes
+
+RISK_LED_PIN_MAP = {
+    "blocked": RISK_LED_BLOCKED_PIN,
+    "partial_blocked": RISK_LED_PARTIAL_BLOCKED_PIN,
+    "clear": RISK_LED_CLEAR_PIN,
+}
+
+
+def _configured_risk_led_pins():
+    pins = []
+    for pin in RISK_LED_PIN_MAP.values():
+        if pin >= 0 and pin not in pins:
+            pins.append(pin)
+    return pins
 
 def _init_gpio():
     """Initialize GPIO pins once at module load."""
@@ -56,59 +62,25 @@ def _init_gpio():
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(TRIG, GPIO.OUT)
         GPIO.setup(ECHO, GPIO.IN)
-        # Legacy 2-LED setup (kept for backward compatibility)
-        if LED_WARNING_ENABLED:
-            GPIO.setup(LED_WARNING_PIN, GPIO.OUT)
-            GPIO.output(LED_WARNING_PIN, GPIO.LOW)
-        if LED_CLEAR_ENABLED:
-            GPIO.setup(LED_CLEAR_PIN, GPIO.OUT)
-            GPIO.output(LED_CLEAR_PIN, GPIO.LOW)
-        # Risk indicator LEDs (REQ-22)
-        if RISK_LED_ENABLED:
-            for pin in (RISK_LED_RED_PIN, RISK_LED_YELLOW_PIN, RISK_LED_GREEN_PIN):
+
+        configured_pins = _configured_risk_led_pins()
+        if configured_pins:
+            for pin in configured_pins:
                 GPIO.setup(pin, GPIO.OUT)
                 GPIO.output(pin, GPIO.LOW)
-            print(f"[GPIO] Risk LED pins initialized: R={RISK_LED_RED_PIN} Y={RISK_LED_YELLOW_PIN} G={RISK_LED_GREEN_PIN}")
+            print(
+                "[GPIO] Risk LED pins initialized: "
+                f"blocked={RISK_LED_BLOCKED_PIN} "
+                f"partial_blocked={RISK_LED_PARTIAL_BLOCKED_PIN} "
+                f"clear={RISK_LED_CLEAR_PIN}"
+            )
+        else:
+            print("[GPIO] Risk LEDs disabled (all state pins are set to -1)")
+
         gpio_initialized = True
         # Register cleanup to run at exit
         atexit.register(GPIO.cleanup)
         print("[GPIO] Initialized successfully")
-
-
-def update_warning_led(water_level):
-    """Toggle warning/clear LEDs based on configured water-level threshold.
-
-    LEGACY — kept for backward compatibility.  New deployments should
-    use update_risk_led() instead.
-    """
-    global _warning_led_state, _clear_led_state
-
-    if not LED_WARNING_ENABLED and not LED_CLEAR_ENABLED:
-        return
-    if MOCK or not GPIO_AVAILABLE:
-        return
-
-    import RPi.GPIO as GPIO
-
-    # For distance sensors, lower distance means higher water level/risk.
-    warning_on = water_level is not None and water_level <= LED_WARNING_THRESHOLD_CM
-    clear_on = water_level is not None and not warning_on
-
-    if LED_WARNING_ENABLED and _warning_led_state is not warning_on:
-        GPIO.output(LED_WARNING_PIN, GPIO.HIGH if warning_on else GPIO.LOW)
-        _warning_led_state = warning_on
-        print(
-            f"[LED] Warning {'ON' if warning_on else 'OFF'} "
-            f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
-        )
-
-    if LED_CLEAR_ENABLED and _clear_led_state is not clear_on:
-        GPIO.output(LED_CLEAR_PIN, GPIO.HIGH if clear_on else GPIO.LOW)
-        _clear_led_state = clear_on
-        print(
-            f"[LED] Clear {'ON' if clear_on else 'OFF'} "
-            f"(level={water_level}, threshold={LED_WARNING_THRESHOLD_CM})"
-        )
 
 
 def water_level_to_risk_score(distance_cm):
@@ -129,17 +101,18 @@ def water_level_to_risk_score(distance_cm):
 
 
 def update_risk_led(combined_risk_score):
-    """Set Risk LED color based on combined risk score.
+    """Set risk-state LEDs based on combined risk score.
 
-    REQ-22.1: Green  → Safe    (score 0–44)
-    REQ-22.2: Yellow → Warning (score 45–75)
-    REQ-22.3: Red    → Danger  (score > 75)
+    Score 0-44   -> clear
+    Score 45-75  -> partial_blocked
+    Score > 75   -> blocked
 
-    Solid colors only; only writes GPIO when the tier actually changes.
+    Only writes GPIO when the tier actually changes.
     """
     global _risk_led_tier
 
-    if not RISK_LED_ENABLED:
+    configured_pins = _configured_risk_led_pins()
+    if not configured_pins:
         return
     if MOCK or not GPIO_AVAILABLE:
         return
@@ -148,11 +121,11 @@ def update_risk_led(combined_risk_score):
 
     # Determine tier
     if combined_risk_score <= 44:
-        tier = "safe"
+        tier = "clear"
     elif combined_risk_score <= 75:
-        tier = "warning"
+        tier = "partial_blocked"
     else:
-        tier = "danger"
+        tier = "blocked"
 
     # Skip redundant GPIO writes
     if tier == _risk_led_tier:
@@ -160,23 +133,17 @@ def update_risk_led(combined_risk_score):
 
     import RPi.GPIO as GPIO
 
-    if tier == "safe":
-        GPIO.output(RISK_LED_RED_PIN, GPIO.LOW)
-        GPIO.output(RISK_LED_YELLOW_PIN, GPIO.LOW)
-        GPIO.output(RISK_LED_GREEN_PIN, GPIO.HIGH)
-    elif tier == "warning":
-        GPIO.output(RISK_LED_RED_PIN, GPIO.LOW)
-        GPIO.output(RISK_LED_YELLOW_PIN, GPIO.HIGH)
-        GPIO.output(RISK_LED_GREEN_PIN, GPIO.LOW)
-    else:  # danger
-        GPIO.output(RISK_LED_RED_PIN, GPIO.HIGH)
-        GPIO.output(RISK_LED_YELLOW_PIN, GPIO.LOW)
-        GPIO.output(RISK_LED_GREEN_PIN, GPIO.LOW)
+    for pin in configured_pins:
+        GPIO.output(pin, GPIO.LOW)
+
+    active_pin = RISK_LED_PIN_MAP.get(tier, -1)
+    if active_pin >= 0:
+        GPIO.output(active_pin, GPIO.HIGH)
 
     _risk_led_tier = tier
     print(
-        f"[LED] Risk Indicator → {tier.upper()} "
-        f"(score={combined_risk_score}, R={RISK_LED_RED_PIN} Y={RISK_LED_YELLOW_PIN} G={RISK_LED_GREEN_PIN})"
+        f"[LED] Risk Indicator -> {tier.upper()} "
+        f"(score={combined_risk_score}, active_pin={active_pin})"
     )
 
 # Initialize GPIO when module is imported (skip in mock mode)

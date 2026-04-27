@@ -35,12 +35,19 @@ CAMERA_INTERVAL = float(os.getenv("CAMERA_INTERVAL", "0.5"))   # seconds  (2 fps
 SENSOR_TRIG_PIN = int(os.getenv("SENSOR_TRIG_PIN", "23"))
 SENSOR_ECHO_PIN = int(os.getenv("SENSOR_ECHO_PIN", "24"))
 
-# ── Local warning LED (optional) ────────────────────────────────────────────
-LED_WARNING_ENABLED = os.getenv("LED_WARNING_ENABLED", "false").lower() == "true"
-LED_WARNING_PIN = int(os.getenv("LED_WARNING_PIN", "18"))
-LED_WARNING_THRESHOLD_CM = float(os.getenv("LED_WARNING_THRESHOLD_CM", "10.0"))
-LED_CLEAR_ENABLED = os.getenv("LED_CLEAR_ENABLED", "false").lower() == "true"
-LED_CLEAR_PIN = int(os.getenv("LED_CLEAR_PIN", "15"))
+# ── Risk Indicator LEDs (unified, state-based naming) ──────────────────────
+# Use -1 to disable a specific state LED.
+# Backward compatibility: falls back to legacy color-based env vars when
+# the new names are not present.
+RISK_LED_BLOCKED_PIN = int(
+    os.getenv("RISK_LED_BLOCKED_PIN", os.getenv("RISK_LED_RED_PIN", "14"))
+)
+RISK_LED_PARTIAL_BLOCKED_PIN = int(
+    os.getenv("RISK_LED_PARTIAL_BLOCKED_PIN", os.getenv("RISK_LED_YELLOW_PIN", "18"))
+)
+RISK_LED_CLEAR_PIN = int(
+    os.getenv("RISK_LED_CLEAR_PIN", os.getenv("RISK_LED_GREEN_PIN", "15"))
+)
 
 # ── Sensor filtering (outlier rejection + smoothing) ───────────────────────
 # Recommended baseline for ultrasonic water-level telemetry:
@@ -65,12 +72,6 @@ FRAME_QUALITY_MAX_BRIGHTNESS = float(os.getenv("FRAME_QUALITY_MAX_BRIGHTNESS", "
 FRAME_QUALITY_MIN_CONTRAST_STDDEV = float(os.getenv("FRAME_QUALITY_MIN_CONTRAST_STDDEV", "25.0"))
 FRAME_QUALITY_MIN_LAPLACIAN_VAR = float(os.getenv("FRAME_QUALITY_MIN_LAPLACIAN_VAR", "100.0"))
 FRAME_QUALITY_RESIZE_WIDTH = int(os.getenv("FRAME_QUALITY_RESIZE_WIDTH", "320"))
-
-# ── Risk Indicator LEDs (Fusion Engine / water-level fallback) ─────────────
-RISK_LED_ENABLED = os.getenv("RISK_LED_ENABLED", "true").lower() == "true"
-RISK_LED_RED_PIN = int(os.getenv("RISK_LED_RED_PIN", "14"))
-RISK_LED_YELLOW_PIN = int(os.getenv("RISK_LED_YELLOW_PIN", "18"))
-RISK_LED_GREEN_PIN = int(os.getenv("RISK_LED_GREEN_PIN", "15"))
 
 # Fusion & Decision Engine API (leave blank to use water-level fallback only)
 RISK_SCORE_API_URL = os.getenv("RISK_SCORE_API_URL", "")

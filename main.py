@@ -32,11 +32,10 @@ from config import (
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
     RISK_SCORE_API_URL,
     RISK_SCORE_POLL_INTERVAL,
-    RISK_LED_ENABLED,
 )
 from camera import PersistentCamera, build_ir_status_image, get_ir_status_snapshot, force_night_vision
 from frame_quality import get_frame_quality_metrics, is_frame_usable, is_frame_dark, is_frame_obscured
-from sensor import get_water_level, update_warning_led, update_risk_led, water_level_to_risk_score
+from sensor import get_water_level, update_risk_led, water_level_to_risk_score
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
 
@@ -243,8 +242,7 @@ def sensor_loop():
                         f"[SENSOR] Dropped raw level={level}cm (reason={filter_status})"
                     )
                 else:
-                    update_warning_led(filtered_level)
-                    # Also drive the RGB LED via water-level fallback
+                    # Drive state-based risk LEDs via water-level fallback.
                     risk_score = water_level_to_risk_score(filtered_level)
                     if risk_score is not None:
                         update_risk_led(risk_score)
