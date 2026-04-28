@@ -451,13 +451,13 @@ def risk_led_loop():
             )
             response.raise_for_status()
             data = response.json()
-            score = data.get("combined_risk_score")
+            score = data.get("risk_score")
             if score is not None:
                 update_risk_led(score)
                 logger.debug(f"[LED] API risk score={score}")
             else:
                 logger.warning(
-                    "[LED] API response missing 'combined_risk_score' key"
+                    "[LED] API response missing 'risk_score' key"
                 )
         except requests.exceptions.Timeout:
             logger.warning(

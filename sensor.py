@@ -11,9 +11,9 @@ from config import (
     SENSOR_BURST_MIN_VALID,
     SENSOR_BURST_SAMPLE_DELAY_S,
     SENSOR_TEMPERATURE_C,
-    RISK_LED_BLOCKED_PIN,
-    RISK_LED_PARTIAL_BLOCKED_PIN,
-    RISK_LED_CLEAR_PIN,
+    RISK_LED_CRITICAL_PIN,
+    RISK_LED_WARNING_PIN,
+    RISK_LED_SAFE_PIN,
     RISK_FALLBACK_SAFE_ABOVE_CM,
     RISK_FALLBACK_WARNING_ABOVE_CM,
 )
@@ -47,9 +47,9 @@ gpio_initialized = False
 _risk_led_tier = None  # Track current RGB LED tier to avoid redundant GPIO writes
 
 RISK_LED_PIN_MAP = {
-    "blocked": RISK_LED_BLOCKED_PIN,
-    "partial_blocked": RISK_LED_PARTIAL_BLOCKED_PIN,
-    "clear": RISK_LED_CLEAR_PIN,
+    "critical": RISK_LED_CRITICAL_PIN,
+    "warning": RISK_LED_WARNING_PIN,
+    "safe": RISK_LED_SAFE_PIN,
 }
 
 
@@ -96,9 +96,9 @@ def _init_gpio():
                 GPIO.output(pin, GPIO.LOW)
             print(
                 "[GPIO] Risk LED pins initialized: "
-                f"blocked={RISK_LED_BLOCKED_PIN} "
-                f"partial_blocked={RISK_LED_PARTIAL_BLOCKED_PIN} "
-                f"clear={RISK_LED_CLEAR_PIN}"
+                f"critical={RISK_LED_CRITICAL_PIN} "
+                f"warning={RISK_LED_WARNING_PIN} "
+                f"safe={RISK_LED_SAFE_PIN}"
             )
         else:
             print("[GPIO] Risk LEDs disabled (all state pins are set to -1)")
@@ -164,7 +164,7 @@ def water_level_to_risk_score(distance_cm):
     Lower distance = higher water = higher risk.
         ≥ SAFE_ABOVE_CM       → 0   (safe)
         ≥ WARNING_ABOVE_CM    → 50  (warning)
-        < WARNING_ABOVE_CM    → 80  (danger)
+        < WARNING_ABOVE_CM    → 80  (critical)
     """
     if distance_cm is None:
         return None
@@ -196,11 +196,11 @@ def update_risk_led(combined_risk_score):
 
     # Determine tier
     if combined_risk_score <= 44:
-        tier = "clear"
+        tier = "safe"
     elif combined_risk_score <= 75:
-        tier = "partial_blocked"
+        tier = "warning"
     else:
-        tier = "blocked"
+        tier = "critical"
 
     # Skip redundant GPIO writes
     if tier == _risk_led_tier:

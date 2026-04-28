@@ -52,14 +52,14 @@ except ValueError:
 # Use -1 to disable a specific state LED.
 # Backward compatibility: falls back to legacy color-based env vars when
 # the new names are not present.
-RISK_LED_BLOCKED_PIN = int(
-    os.getenv("RISK_LED_BLOCKED_PIN", os.getenv("RISK_LED_RED_PIN", "14"))
+RISK_LED_CRITICAL_PIN = int(
+    os.getenv("RISK_LED_CRITICAL_PIN", os.getenv("RISK_LED_RED_PIN", "14"))
 )
-RISK_LED_PARTIAL_BLOCKED_PIN = int(
-    os.getenv("RISK_LED_PARTIAL_BLOCKED_PIN", os.getenv("RISK_LED_YELLOW_PIN", "18"))
+RISK_LED_WARNING_PIN = int(
+    os.getenv("RISK_LED_WARNING_PIN", os.getenv("RISK_LED_YELLOW_PIN", "18"))
 )
-RISK_LED_CLEAR_PIN = int(
-    os.getenv("RISK_LED_CLEAR_PIN", os.getenv("RISK_LED_GREEN_PIN", "15"))
+RISK_LED_SAFE_PIN = int(
+    os.getenv("RISK_LED_SAFE_PIN", os.getenv("RISK_LED_GREEN_PIN", "15"))
 )
 
 # ── Sensor filtering (outlier rejection + smoothing) ───────────────────────
