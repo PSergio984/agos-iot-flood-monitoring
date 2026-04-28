@@ -263,71 +263,84 @@ def sensor_loop():
         f"[SENSOR] Loop started — interval={SENSOR_INTERVAL}s "
         f"({_rate} reading/s)"
     )
+    # The short retry delay ensures that if a reading is dropped (e.g., as an outlier),
+    # we quickly sample again to feed the filter and rebaseline if necessary,
+    # rather than waiting a full SENSOR_INTERVAL.
+    retry_delay = min(2.0, SENSOR_INTERVAL if SENSOR_INTERVAL > 0 else 2.0)
+
     while not stop_event.is_set():
         t0 = time.monotonic()
-        try:
-            level = get_water_level()
-            if level is None:
-                logger.warning("Failed to read water level, skipping")
-            else:
-                filtered_level, filter_status = water_level_filter.process(level)
-                if filtered_level is None:
-                    logger.warning(
-                        f"[SENSOR] Dropped raw level={level}cm (reason={filter_status})"
-                    )
+        valid_reading = False
+
+        while not valid_reading and not stop_event.is_set():
+            try:
+                level = get_water_level()
+                if level is None:
+                    logger.warning("Failed to read water level, retrying...")
                 else:
-                    # Drive state-based risk LEDs via water-level fallback.
-                    risk_score = water_level_to_risk_score(filtered_level)
-                    if risk_score is not None:
-                        update_risk_led(risk_score)
-                    logger.info(
-                        f"[SENSOR] Local reading raw={level}cm filtered={filtered_level:.2f}cm "
-                        f"device={SENSOR_DEVICE_ID} filter={filter_status}"
-                    )
+                    filtered_level, filter_status = water_level_filter.process(level)
+                    if filtered_level is None:
+                        logger.warning(
+                            f"[SENSOR] Dropped raw level={level}cm (reason={filter_status}), retrying..."
+                        )
+                    else:
+                        valid_reading = True
+                        # Drive state-based risk LEDs via water-level fallback.
+                        risk_score = water_level_to_risk_score(filtered_level)
+                        if risk_score is not None:
+                            update_risk_led(risk_score)
+                        logger.info(
+                            f"[SENSOR] Local reading raw={level}cm filtered={filtered_level:.2f}cm "
+                            f"device={SENSOR_DEVICE_ID} filter={filter_status}"
+                        )
 
-                    if not SENSOR_POST_ENABLED:
-                        continue
+                        if not SENSOR_POST_ENABLED:
+                            break
 
-                    try:
-                        headers = {}
-                        if IOT_API_KEY:
-                            headers["x-api-key"] = IOT_API_KEY
-                        else:
-                            logger.warning("[SENSOR] IOT_API_KEY is not set; request may be rejected with 401")
+                        try:
+                            headers = {}
+                            if IOT_API_KEY:
+                                headers["x-api-key"] = IOT_API_KEY
+                            else:
+                                logger.warning("[SENSOR] IOT_API_KEY is not set; request may be rejected with 401")
 
-                        payload = {
-                            "sensor_device_id": SENSOR_DEVICE_ID,
-                            "raw_distance_cm": round(level, 2),
-                            "signal_strength": 100,
-                            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        }
-                        response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
-                        if response.status_code == 429:
-                            logger.warning(
-                                "[SENSOR] API rate-limited (429). "
-                                "Keeping local logs and retrying next cycle."
-                            )
-                        else:
-                            response.raise_for_status()
-                            logger.info(
-                                f"Sensor posted: raw={level}cm filtered={filtered_level:.2f}cm "
-                                f"device={SENSOR_DEVICE_ID} filter={filter_status}"
-                            )
-                    except requests.exceptions.Timeout:
-                        logger.error(f"Timeout posting sensor data to {SERVER_URL}")
-                    except requests.exceptions.RequestException as e:
-                        if hasattr(e, "response") and e.response is not None:
-                            logger.error(
-                                f"Sensor post failed: status={e.response.status_code} "
-                                f"body={e.response.text}"
-                            )
-                        else:
-                            logger.error(f"Sensor post failed: {e}")
-        except Exception as e:
-            logger.error(f"Sensor loop error: {e}")
+                            payload = {
+                                "sensor_device_id": SENSOR_DEVICE_ID,
+                                "raw_distance_cm": round(level, 2),
+                                "signal_strength": 100,
+                                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            }
+                            response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
+                            if response.status_code == 429:
+                                logger.warning(
+                                    "[SENSOR] API rate-limited (429). "
+                                    "Keeping local logs and retrying next cycle."
+                                )
+                            else:
+                                response.raise_for_status()
+                                logger.info(
+                                    f"Sensor posted: raw={level}cm filtered={filtered_level:.2f}cm "
+                                    f"device={SENSOR_DEVICE_ID} filter={filter_status}"
+                                )
+                        except requests.exceptions.Timeout:
+                            logger.error(f"Timeout posting sensor data to {SERVER_URL}")
+                        except requests.exceptions.RequestException as e:
+                            if hasattr(e, "response") and e.response is not None:
+                                logger.error(
+                                    f"Sensor post failed: status={e.response.status_code} "
+                                    f"body={e.response.text}"
+                                )
+                            else:
+                                logger.error(f"Sensor post failed: {e}")
+            except Exception as e:
+                logger.error(f"Sensor loop error: {e}")
+
+            if not valid_reading:
+                stop_event.wait(retry_delay)
 
         # Sleep for the remainder of the interval; wake immediately on shutdown.
-        stop_event.wait(max(0.0, SENSOR_INTERVAL - (time.monotonic() - t0)))
+        elapsed = time.monotonic() - t0
+        stop_event.wait(max(0.0, SENSOR_INTERVAL - elapsed))
 
 
 def camera_loop():
