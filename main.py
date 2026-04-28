@@ -20,6 +20,10 @@ from config import (
     CAMERA_SEND_PRECAPTURE_STATUS_IMAGE,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
+    USE_TRAINING_CAPTURES,
+    TRAINING_CAPTURES_DIR,
+    USE_TRAINING_RAINING,
+    TRAINING_RAINING_DIR,
     SENSOR_POST_ENABLED,
     SENSOR_FILTER_ENABLED,
     SENSOR_FILTER_WINDOW_SIZE,
@@ -54,9 +58,25 @@ WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
 
 _TEST_IMAGE_INDEX = 0
 
+# ── Image-source registry ────────────────────────────────────────────────────
+# Build an ordered list of (label, directory) pairs for all enabled static
+# image sources.  Priority: test_images → training_captures → training_raining.
+# Each source is served round-robin; when multiple are active they are visited
+# in the order below (training_captures exhausted before training_raining).
+_IMAGE_SOURCES: list[tuple[str, str]] = []
+if USE_TEST_IMAGES:
+    _IMAGE_SOURCES.append(("test_images", TEST_IMAGES_DIR))
+if USE_TRAINING_CAPTURES:
+    _IMAGE_SOURCES.append(("training_captures", TRAINING_CAPTURES_DIR))
+if USE_TRAINING_RAINING:
+    _IMAGE_SOURCES.append(("training_raining", TRAINING_RAINING_DIR))
 
-def _load_test_images() -> list[Path]:
-    image_dir = Path(TEST_IMAGES_DIR)
+_USE_STATIC_IMAGES = bool(_IMAGE_SOURCES)
+
+
+def _load_images_from_dir(directory: str) -> list[Path]:
+    """Return sorted list of image paths inside *directory*."""
+    image_dir = Path(directory)
     if not image_dir.exists() or not image_dir.is_dir():
         return []
     allowed = {".jpg", ".jpeg", ".png"}
@@ -65,21 +85,30 @@ def _load_test_images() -> list[Path]:
         for p in image_dir.rglob("*")
         if p.is_file() and p.suffix.lower() in allowed
     ]
-    return sorted(
-        images, key=lambda p: p.relative_to(image_dir).as_posix().lower()
-    )
+    return sorted(images, key=lambda p: p.relative_to(image_dir).as_posix().lower())
 
 
-_TEST_IMAGES = _load_test_images()
+# Per-source image lists and cycling indices.
+_SOURCE_IMAGES: dict[str, list[Path]] = {
+    label: _load_images_from_dir(directory)
+    for label, directory in _IMAGE_SOURCES
+}
+_SOURCE_INDICES: dict[str, int] = {label: 0 for label, _ in _IMAGE_SOURCES}
 
 
-def _next_test_image_path() -> Path | None:
-    global _TEST_IMAGE_INDEX
-    if not _TEST_IMAGES:
-        return None
-    image_path = _TEST_IMAGES[_TEST_IMAGE_INDEX % len(_TEST_IMAGES)]
-    _TEST_IMAGE_INDEX += 1
-    return image_path
+def _next_static_image() -> tuple[str, Path] | tuple[None, None]:
+    """Return the next (source_label, image_path) pair cycling across all
+    enabled sources in priority order: training_captures first, then
+    training_raining.  Returns (None, None) when no images are available."""
+    for label, _ in _IMAGE_SOURCES:
+        images = _SOURCE_IMAGES.get(label, [])
+        if not images:
+            continue
+        idx = _SOURCE_INDICES[label]
+        path = images[idx % len(images)]
+        _SOURCE_INDICES[label] = idx + 1
+        return label, path
+    return None, None
 
 
 def _safe_ws_url(url):
@@ -313,17 +342,22 @@ def camera_loop():
         f"[CAMERA] Loop started — interval={CAMERA_INTERVAL}s "
         f"({_fps} fps)"
     )
-    if USE_TEST_IMAGES:
-        logger.info(f"[CAMERA] Using test images from {TEST_IMAGES_DIR}")
-        cam = None
+    if _USE_STATIC_IMAGES:
+        source_labels = ", ".join(label for label, _ in _IMAGE_SOURCES)
+        logger.info(f"[CAMERA] Static image mode — sources (in order): {source_labels}")
+        # Log per-source image counts so the user knows what will be served.
+        for label, directory in _IMAGE_SOURCES:
+            count = len(_SOURCE_IMAGES.get(label, []))
+            logger.info(f"[CAMERA]   {label}: {count} image(s) from '{directory}/'")
+
         while not stop_event.is_set():
             t0 = time.monotonic()
             path = None
             try:
                 _send_precapture_status_image()
-                path = _next_test_image_path()
+                source_label, path = _next_static_image()
                 if path is None:
-                    logger.warning(f"[CAMERA] No images in {TEST_IMAGES_DIR}")
+                    logger.warning("[CAMERA] No images available in any enabled source folder")
                 else:
                     # ── Environment sensing (reuses existing quality metrics) ──
                     metrics = get_frame_quality_metrics(str(path))
@@ -337,7 +371,8 @@ def camera_loop():
 
                     if not is_frame_usable(str(path)):
                         logger.warning(
-                            f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
+                            f"[CAMERA] Dropped frame {path} [{source_label}] (quality gate): "
+                            f"{_format_frame_metrics(metrics)}"
                         )
                         stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
                         continue
@@ -354,13 +389,14 @@ def camera_loop():
                             cloudinary_url=url,
                             extra_metadata={
                                 "frame_role": "camera_frame",
+                                "image_source": source_label,
                                 "ir_status": get_ir_status_snapshot(),
                             },
                         )
                         if not ws_ok:
                             logger.warning(f"[CAMERA] WebSocket send failed for {path}")
                     if url:
-                        logger.info(f"Camera: uploaded {url}")
+                        logger.info(f"Camera: uploaded [{source_label}] {url}")
             except Exception as e:
                 logger.error(f"Camera loop error: {e}")
 

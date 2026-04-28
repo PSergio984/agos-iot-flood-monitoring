@@ -17,6 +17,10 @@ WS_SEND_METADATA_FIRST = os.getenv("WS_SEND_METADATA_FIRST", "false").lower() ==
 CAMERA_SEND_PRECAPTURE_STATUS_IMAGE = os.getenv("CAMERA_SEND_PRECAPTURE_STATUS_IMAGE", "false").lower() == "true"
 USE_TEST_IMAGES = os.getenv("USE_TEST_IMAGES", "false").lower() == "true"
 TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
+USE_TRAINING_CAPTURES = os.getenv("USE_TRAINING_CAPTURES", "false").lower() == "true"
+TRAINING_CAPTURES_DIR = os.getenv("TRAINING_CAPTURES_DIR", "training_captures")
+USE_TRAINING_RAINING = os.getenv("USE_TRAINING_RAINING", "false").lower() == "true"
+TRAINING_RAINING_DIR = os.getenv("TRAINING_RAINING_DIR", "training_raining")
 SENSOR_POST_ENABLED = os.getenv("SENSOR_POST_ENABLED", "true").lower() == "true"
 
 # ── Timing / throughput ──────────────────────────────────────────────────────
