@@ -64,8 +64,13 @@ def _load_test_images() -> list[Path]:
     if not image_dir.exists() or not image_dir.is_dir():
         return []
     allowed = {".jpg", ".jpeg", ".png"}
+    images = [
+        p
+        for p in image_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in allowed
+    ]
     return sorted(
-        [p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
+        images, key=lambda p: p.relative_to(image_dir).as_posix().lower()
     )
 
 
@@ -78,7 +83,7 @@ def _capture_frame() -> bytes:
     if USE_TEST_IMAGES:
         if not _TEST_IMAGES:
             raise FileNotFoundError(
-                f"USE_TEST_IMAGES=true but no images found in '{TEST_IMAGES_DIR}'. "
+                f"USE_TEST_IMAGES=true but no images found under '{TEST_IMAGES_DIR}'. "
                 "Add test images or set USE_TEST_IMAGES=false."
             )
         image_path = _TEST_IMAGES[_TEST_IMAGE_INDEX % len(_TEST_IMAGES)]

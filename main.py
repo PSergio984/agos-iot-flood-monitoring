@@ -60,8 +60,13 @@ def _load_test_images() -> list[Path]:
     if not image_dir.exists() or not image_dir.is_dir():
         return []
     allowed = {".jpg", ".jpeg", ".png"}
+    images = [
+        p
+        for p in image_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in allowed
+    ]
     return sorted(
-        [p for p in image_dir.iterdir() if p.is_file() and p.suffix.lower() in allowed]
+        images, key=lambda p: p.relative_to(image_dir).as_posix().lower()
     )
 
 
