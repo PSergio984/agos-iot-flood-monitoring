@@ -96,18 +96,33 @@ _SOURCE_IMAGES: dict[str, list[Path]] = {
 _SOURCE_INDICES: dict[str, int] = {label: 0 for label, _ in _IMAGE_SOURCES}
 
 
+_GLOBAL_SOURCE_INDEX = 0
+
+
 def _next_static_image() -> tuple[str, Path] | tuple[None, None]:
     """Return the next (source_label, image_path) pair cycling across all
-    enabled sources in priority order: training_captures first, then
-    training_raining.  Returns (None, None) when no images are available."""
-    for label, _ in _IMAGE_SOURCES:
+    enabled sources in round-robin order.  Returns (None, None) when no
+    images are available."""
+    global _GLOBAL_SOURCE_INDEX
+    num_sources = len(_IMAGE_SOURCES)
+    if num_sources == 0:
+        return None, None
+
+    # Try each source starting from the next one in global sequence.
+    for _ in range(num_sources):
+        current_source_idx = _GLOBAL_SOURCE_INDEX % num_sources
+        _GLOBAL_SOURCE_INDEX += 1  # Advance for the next call
+
+        label, _ = _IMAGE_SOURCES[current_source_idx]
         images = _SOURCE_IMAGES.get(label, [])
         if not images:
             continue
+
         idx = _SOURCE_INDICES[label]
         path = images[idx % len(images)]
         _SOURCE_INDICES[label] = idx + 1
         return label, path
+
     return None, None
 
 
