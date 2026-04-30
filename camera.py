@@ -1,13 +1,17 @@
 # camera.py
 import os
 import subprocess
+import shutil
 import tempfile
 import datetime
+from pathlib import Path
 
 try:
     from zoneinfo import ZoneInfo
 except Exception:
     ZoneInfo = None
+
+from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR
 
 CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
 CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
@@ -78,6 +82,52 @@ except (ImportError, ModuleNotFoundError):
 except Exception as e:
     MOCK = True
     print(f"[CAMERA] Camera initialisation failed ({e}) — running in MOCK mode")
+
+
+def _load_images_from_dir(directory: str) -> list[Path]:
+    image_dir = Path(directory)
+    if not image_dir.exists() or not image_dir.is_dir():
+        return []
+    allowed = {".jpg", ".jpeg", ".png"}
+    images = [
+        p
+        for p in image_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in allowed
+    ]
+    return sorted(images, key=lambda p: p.relative_to(image_dir).as_posix().lower())
+
+
+_MOCK_FALLBACK_SOURCES: list[tuple[str, str]] = [
+    ("training_captures", TRAINING_CAPTURES_DIR),
+    ("training_raining", TRAINING_RAINING_DIR),
+]
+_MOCK_FALLBACK_INDICES: dict[str, int] = {label: 0 for label, _ in _MOCK_FALLBACK_SOURCES}
+_MOCK_FALLBACK_SOURCE_INDEX = 0
+
+
+def _next_mock_fallback_image() -> tuple[str, Path] | tuple[None, None]:
+    """Return the next training image for mock/no-camera fallback."""
+    global _MOCK_FALLBACK_SOURCE_INDEX
+
+    num_sources = len(_MOCK_FALLBACK_SOURCES)
+    if num_sources == 0:
+        return None, None
+
+    for _ in range(num_sources):
+        current_source_idx = _MOCK_FALLBACK_SOURCE_INDEX % num_sources
+        _MOCK_FALLBACK_SOURCE_INDEX += 1
+
+        label, directory = _MOCK_FALLBACK_SOURCES[current_source_idx]
+        images = _load_images_from_dir(directory)
+        if not images:
+            continue
+
+        idx = _MOCK_FALLBACK_INDICES[label]
+        path = images[idx % len(images)]
+        _MOCK_FALLBACK_INDICES[label] = idx + 1
+        return label, path
+
+    return None, None
 
 # ── IR-CUT filter helpers ────────────────────────────────────────────────────
 
@@ -443,6 +493,20 @@ def capture_image(path=None):
         temp_dir = tempfile.gettempdir()
         path = os.path.join(temp_dir, "frame.jpg")
     if MOCK or not PICAMERA_AVAILABLE:
+        # Prefer training data when no physical camera is available so the rest
+        # of the pipeline still sees realistic frames instead of blue mock images.
+        fallback_label, fallback_image = _next_mock_fallback_image()
+        if fallback_image is not None:
+            try:
+                shutil.copy2(fallback_image, path)
+                print(f"[MOCK] Using {fallback_label} fallback image: {fallback_image} -> {path}")
+                return path
+            except Exception as e:
+                print(
+                    f"[MOCK] Failed to copy {fallback_label} fallback image {fallback_image} "
+                    f"to {path}: {e}"
+                )
+
         # Option 1: Use fswebcam for VM testing with USB camera
         if USE_FSWEBCAM:
             try:
@@ -461,15 +525,8 @@ def capture_image(path=None):
                 print("[MOCK] fswebcam not installed, falling back to test image")
             except Exception as e:
                 print(f"[MOCK] fswebcam error: {e}")
-        
-        # Option 2: Copy existing test image
-        if os.path.exists("test_image.jpg"):
-            import shutil
-            shutil.copy("test_image.jpg", path)
-            print(f"[MOCK] Copied test_image.jpg to {path}")
-            return path
-        
-        # Option 3: Generate a blank test image with PIL
+
+        # Option 2: Generate a blank test image with PIL
         try:
             from PIL import Image, ImageDraw
             import datetime

@@ -1,11 +1,13 @@
-from pathlib import Path
 import datetime as dt
+from pathlib import Path
 
 import camera
 
 
-def test_capture_image_uses_test_image_copy(monkeypatch, tmp_path):
-    src = tmp_path / "test_image.jpg"
+def test_capture_image_uses_training_fallback_images(monkeypatch, tmp_path):
+    training_captures = tmp_path / "training_captures"
+    training_captures.mkdir()
+    src = training_captures / "capture_01.jpg"
     src.write_bytes(b"source-bytes")
 
     dst = tmp_path / "out.jpg"
@@ -14,11 +16,37 @@ def test_capture_image_uses_test_image_copy(monkeypatch, tmp_path):
     monkeypatch.setattr(camera, "MOCK", True)
     monkeypatch.setattr(camera, "PICAMERA_AVAILABLE", False)
     monkeypatch.setattr(camera, "USE_FSWEBCAM", False)
+    monkeypatch.setattr(camera, "TRAINING_CAPTURES_DIR", str(training_captures))
+    monkeypatch.setattr(camera, "TRAINING_RAINING_DIR", str(tmp_path / "training_raining"))
 
     result = camera.capture_image(str(dst))
 
     assert result == str(dst)
     assert dst.read_bytes() == b"source-bytes"
+
+
+def test_capture_image_falls_through_when_training_copy_fails(monkeypatch, tmp_path):
+    training_captures = tmp_path / "training_captures"
+    training_captures.mkdir()
+    src = training_captures / "capture_01.jpg"
+    src.write_bytes(b"source-bytes"
+    )
+
+    dst = tmp_path / "out.jpg"
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(camera, "MOCK", True)
+    monkeypatch.setattr(camera, "PICAMERA_AVAILABLE", False)
+    monkeypatch.setattr(camera, "USE_FSWEBCAM", False)
+    monkeypatch.setattr(camera, "TRAINING_CAPTURES_DIR", str(training_captures))
+    monkeypatch.setattr(camera, "TRAINING_RAINING_DIR", str(tmp_path / "training_raining"))
+    monkeypatch.setattr(camera.shutil, "copy2", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("copy failed")))
+
+    result = camera.capture_image(str(dst))
+
+    assert result == str(dst)
+    assert dst.exists()
+    assert dst.read_bytes() != b"source-bytes"
 
 
 def test_persistent_camera_capture_delegates_to_capture_image_in_mock(monkeypatch, tmp_path):
