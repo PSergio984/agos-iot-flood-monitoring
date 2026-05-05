@@ -1,13 +1,5 @@
 """
-AGOS Defense Burst Capture Tool
-================================
-Designed specifically for your project defense! 
-
 This script allows you to capture a rapid burst of images (e.g., 10 frames over 10 seconds)
-so that you can run the script, step away from the keyboard, and spray water on the camera 
-or ultrasonic sensor to demonstrate the system's robustness without needing to press 
-ENTER for every single picture.
-
 Usage:
     python burst_capture.py             # Default: 10 images, 1 second apart
     python burst_capture.py --count 20  # Capture 20 images
@@ -20,6 +12,7 @@ import os
 import time
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import cloudinary
@@ -37,11 +30,13 @@ cloudinary.config(
 
 from camera import PersistentCamera
 
-LOCAL_BACKUP_DIR = "training_raining"
-CLOUD_FOLDER = "agos/training_raining"
+LOCAL_BACKUP_DIR = "training_normal2"
+CLOUD_FOLDER = "agos/training_normal2"
+
 
 def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
+
 
 def upload_to_cloudinary(filepath, session_id):
     """Upload a single image to Cloudinary."""
@@ -58,16 +53,31 @@ def upload_to_cloudinary(filepath, session_id):
         print(f"    [FAIL] Upload error: {e}")
         return False
 
+
 def main():
     parser = argparse.ArgumentParser(description="Defense Burst Capture")
-    parser.add_argument("-c", "--count", type=int, default=10, help="Number of images to capture (default: 10)")
-    parser.add_argument("-d", "--delay", type=float, default=1.0, help="Seconds to wait between captures (default: 1.0)")
-    parser.add_argument("--no-upload", action="store_true", help="Skip uploading to Cloudinary")
+    parser.add_argument(
+        "-c",
+        "--count",
+        type=int,
+        default=10,
+        help="Number of images to capture (default: 10)",
+    )
+    parser.add_argument(
+        "-d",
+        "--delay",
+        type=float,
+        default=1.0,
+        help="Seconds to wait between captures (default: 1.0)",
+    )
+    parser.add_argument(
+        "--no-upload", action="store_true", help="Skip uploading to Cloudinary"
+    )
     args = parser.parse_args()
 
     _ensure_dir(LOCAL_BACKUP_DIR)
     session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
+
     print("\n========================================================")
     print("  AGOS Defense Burst Capture (Water Spray Test)")
     print("========================================================")
@@ -76,20 +86,20 @@ def main():
     print(f"  Folder: ./{LOCAL_BACKUP_DIR}/")
     print(f"  Upload: {'Disabled' if args.no_upload else 'Enabled (after capture)'}")
     print("========================================================\n")
-    
+
     input("Press ENTER to START the burst capture (then start spraying!)...")
-    
+
     print("\n[CAMERA] Warming up camera...")
     captured_files = []
-    
+
     with PersistentCamera() as cam:
         print("\n[START] Burst capture sequence initiated!\n")
-        
+
         for i in range(1, args.count + 1):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             filename = f"burst_{session_id}_{i:03d}_{timestamp}.jpg"
             filepath = os.path.join(LOCAL_BACKUP_DIR, filename)
-            
+
             try:
                 # Capture frame
                 cam.capture(filepath)
@@ -97,22 +107,25 @@ def main():
                 captured_files.append(filepath)
             except Exception as e:
                 print(f"  [{i}/{args.count}] [ERROR] Capture failed: {e}")
-            
+
             # Wait before next capture (skip delay on the last image)
             if i < args.count:
                 time.sleep(args.delay)
-                
+
     print("\n[DONE] Burst capture complete!")
-    
+
     # Upload phase
     if not args.no_upload and captured_files:
         print(f"\n[CLOUD] Uploading {len(captured_files)} images to Cloudinary...")
         for i, filepath in enumerate(captured_files, 1):
-            print(f"  [{i}/{len(captured_files)}] Uploading {os.path.basename(filepath)}...")
+            print(
+                f"  [{i}/{len(captured_files)}] Uploading {os.path.basename(filepath)}..."
+            )
             upload_to_cloudinary(filepath, session_id)
         print("[CLOUD] Uploads complete!")
-        
+
     print("\n[SUCCESS] Check your training_captures/ folder or Cloudinary dashboard.")
+
 
 if __name__ == "__main__":
     try:
