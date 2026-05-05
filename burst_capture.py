@@ -30,8 +30,8 @@ cloudinary.config(
 
 from camera import PersistentCamera
 
-LOCAL_BACKUP_DIR = "training_normal2"
-CLOUD_FOLDER = "agos/training_normal2"
+LOCAL_BACKUP_DIR = "training_raining2"
+CLOUD_FOLDER = "agos/training_raining2"
 
 
 def _ensure_dir(path):
