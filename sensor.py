@@ -2,6 +2,7 @@ import os
 import time
 import random
 import statistics
+import logging
 
 from config import (
     SENSOR_ECHO_PIN,
@@ -18,6 +19,8 @@ from config import (
     RISK_FALLBACK_WARNING_ABOVE_CM,
 )
 
+logger = logging.getLogger(__name__)
+
 # Check if we're explicitly in mock mode or if RPi.GPIO is unavailable
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
 
@@ -28,6 +31,7 @@ GPIO_AVAILABLE = False
 try:
     if not MOCK:
         import RPi.GPIO as GPIO  # type: ignore[import-not-found]
+
         GPIO_AVAILABLE = True
 
         print("[GPIO] RPi.GPIO module loaded successfully")
@@ -79,12 +83,14 @@ def _speed_of_sound_cm_s(temp_c):
 def _pulse_duration_to_cm(pulse_duration_s, temp_c):
     return (pulse_duration_s * _speed_of_sound_cm_s(temp_c)) / 2.0
 
+
 def _init_gpio():
     """Initialize GPIO pins once at module load."""
     global gpio_initialized
     if not gpio_initialized and GPIO_AVAILABLE and not MOCK:
         import RPi.GPIO as GPIO  # type: ignore[import-not-found]
         import atexit
+
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(TRIG, GPIO.OUT)
         GPIO.setup(ECHO, GPIO.IN)
@@ -122,9 +128,11 @@ def _read_single_distance_cm():
     #   3.3V mode: VCC→3.3V pin — ECHO outputs 3.3V, Pi-safe, no voltage divider needed.
     #   5V mode  : VCC→5V pin  — ECHO outputs 5V; add a 1kΩ/2kΩ divider to protect GPIO.
     if GPIO.input(ECHO) == 1:
-        print("[SENSOR] Warning: ECHO is HIGH before trigger. "
-              "Check wiring — if VCC is 5V, ECHO needs a 1kΩ/2kΩ voltage divider; "
-              "use 3.3V on VCC to avoid this.")
+        print(
+            "[SENSOR] Warning: ECHO is HIGH before trigger. "
+            "Check wiring — if VCC is 5V, ECHO needs a 1kΩ/2kΩ voltage divider; "
+            "use 3.3V on VCC to avoid this."
+        )
 
     # Ensure the trigger pin is LOW long enough for the sensor cycle to settle
     # before sending the 10µs trigger pulse. A microsecond-scale sleep is not
@@ -186,15 +194,11 @@ def update_risk_led(combined_risk_score):
     """
     global _risk_led_tier
 
-    configured_pins = _configured_risk_led_pins()
-    if not configured_pins:
-        return
-    if MOCK or not GPIO_AVAILABLE:
-        return
     if combined_risk_score is None:
         return
 
-    # Determine tier
+    # Determine tier and target pin up front so we can log the decision even
+    # when GPIO is unavailable or the LED state does not change.
     if combined_risk_score <= 44:
         tier = "safe"
     elif combined_risk_score <= 75:
@@ -202,8 +206,28 @@ def update_risk_led(combined_risk_score):
     else:
         tier = "critical"
 
+    active_pin = RISK_LED_PIN_MAP.get(tier, -1)
+
+    configured_pins = _configured_risk_led_pins()
+    if not configured_pins:
+        logger.info(
+            f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
+            f"active_pin={active_pin} (no risk LED pins configured)"
+        )
+        return
+    if MOCK or not GPIO_AVAILABLE:
+        logger.info(
+            f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
+            f"active_pin={active_pin} (GPIO unavailable/mock mode)"
+        )
+        return
+
     # Skip redundant GPIO writes
     if tier == _risk_led_tier:
+        logger.info(
+            f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
+            f"active_pin={active_pin} (unchanged)"
+        )
         return
 
     import RPi.GPIO as GPIO  # type: ignore[import-not-found]
@@ -216,13 +240,15 @@ def update_risk_led(combined_risk_score):
         GPIO.output(active_pin, GPIO.HIGH)
 
     _risk_led_tier = tier
-    print(
-        f"[LED] Risk Indicator -> {tier.upper()} "
-        f"(score={combined_risk_score}, active_pin={active_pin})"
+    logger.info(
+        f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
+        f"active_pin={active_pin}"
     )
+
 
 # Initialize GPIO when module is imported (skip in mock mode)
 _init_gpio()
+
 
 def get_water_level():
     """Read water level from JSN-SR04 ultrasonic sensor."""
@@ -233,7 +259,7 @@ def get_water_level():
         mock_level = round(base_level + variation, 2)
         print(f"[MOCK] Generated water level: {mock_level} cm")
         return mock_level
-    
+
     min_valid = min(SENSOR_BURST_MIN_VALID, SENSOR_BURST_SAMPLES)
 
     for attempt in range(1, MAX_RETRIES + 1):
@@ -244,7 +270,9 @@ def get_water_level():
                 if distance_cm is not None:
                     samples.append(distance_cm)
             except TimeoutError as e:
-                print(f"[SENSOR] Timeout (burst {attempt} sample {sample_idx + 1}): {e}")
+                print(
+                    f"[SENSOR] Timeout (burst {attempt} sample {sample_idx + 1}): {e}"
+                )
             except Exception as e:
                 print(f"[SENSOR] Error (burst {attempt} sample {sample_idx + 1}): {e}")
 
