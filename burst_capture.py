@@ -9,14 +9,16 @@ Usage:
 import argparse
 import datetime
 import os
+import sys
 import time
-
-from dotenv import load_dotenv
-
-load_dotenv()
 
 import cloudinary
 import cloudinary.uploader
+from dotenv import load_dotenv
+
+from camera import PersistentCamera
+
+load_dotenv()
 
 CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 API_KEY = os.getenv("CLOUDINARY_API_KEY")
@@ -27,8 +29,6 @@ cloudinary.config(
     api_key=API_KEY,
     api_secret=API_SECRET,
 )
-
-from camera import PersistentCamera
 
 LOCAL_BACKUP_DIR = "training_raining2"
 CLOUD_FOLDER = "agos/training_raining2"

@@ -33,14 +33,16 @@ import os
 import shutil
 import sys
 
+import cloudinary
+import cloudinary.uploader
 from dotenv import load_dotenv
+
+from camera import PersistentCamera
+from frame_quality import are_metrics_usable, get_frame_quality_metrics
 
 load_dotenv()
 
 # ── Cloudinary setup (reuse project .env) ────────────────────────────────────
-import cloudinary
-import cloudinary.uploader
-
 CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
 API_KEY = os.getenv("CLOUDINARY_API_KEY")
 API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
@@ -50,10 +52,6 @@ cloudinary.config(
     api_key=API_KEY,
     api_secret=API_SECRET,
 )
-
-# ── Import project camera (Picamera2 / mock) ────────────────────────────────
-from camera import PersistentCamera
-from frame_quality import get_frame_quality_metrics, are_metrics_usable
 
 # ── Constants ────────────────────────────────────────────────────────────────
 DEFAULT_FOLDER = "agos/training_capture"
@@ -126,7 +124,7 @@ def run(folder, do_upload):
     print("=" * 56)
     print("  AGOS Training Data Capture")
     print("=" * 56)
-    print(f"  Camera:       Picamera2 (PersistentCamera)")
+    print("  Camera:       Picamera2 (PersistentCamera)")
     print(f"  Cloud folder: {folder}/")
     print(f"  Upload:       {'enabled' if do_upload else 'DISABLED (local only)'}")
     print(f"  Session:      {session}")
@@ -159,7 +157,7 @@ def run(folder, do_upload):
             cap_path = cam.capture()
 
             if cap_path is None or not os.path.exists(cap_path):
-                print(f"  [FAIL] Capture returned no image.")
+                print("  [FAIL] Capture returned no image.")
                 capture_count -= 1
                 continue
 
@@ -176,7 +174,7 @@ def run(folder, do_upload):
                       f"contrast={metrics['contrast_stddev']:.1f}  "
                       f"sharpness={metrics['laplacian_var']:.1f}")
                 if not usable:
-                    print(f"  [QA]   \u26a0 Image may be too dark/blurry — consider retaking")
+                    print("  [QA]   \u26a0 Image may be too dark/blurry — consider retaking")
 
             # Upload to Cloudinary
             if do_upload:
@@ -188,9 +186,9 @@ def run(folder, do_upload):
                     print(f"  [OK]   {public_id}")
                     print(f"         {url}")
                 else:
-                    print(f"  [FAIL] Upload failed. Local backup kept.")
+                    print("  [FAIL] Upload failed. Local backup kept.")
             else:
-                print(f"  [SKIP] Upload disabled (--no-upload)")
+                print("  [SKIP] Upload disabled (--no-upload)")
 
             # Clean up the temp capture file (backup already saved)
             try:

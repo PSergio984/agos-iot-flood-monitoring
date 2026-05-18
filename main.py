@@ -56,6 +56,9 @@ logger = logging.getLogger(__name__)
 SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
 WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
 
+# Track active API polling status to prevent race conditions with sensor fallback LED updates
+api_last_success_time = 0.0
+
 _TEST_IMAGE_INDEX = 0
 
 # ── Image-source registry ────────────────────────────────────────────────────
@@ -300,10 +303,16 @@ def sensor_loop():
                         )
                     else:
                         valid_reading = True
-                        # Drive state-based risk LEDs via water-level fallback.
-                        risk_score = water_level_to_risk_score(filtered_level)
-                        if risk_score is not None:
-                            update_risk_led(risk_score)
+                        # Drive state-based risk LEDs via water-level fallback,
+                        # but ONLY if the API is not configured or has been failing/unreachable.
+                        now = time.monotonic()
+                        api_timeout = (RISK_SCORE_POLL_INTERVAL or 10.0) * 2.5
+                        api_is_failing = (now - api_last_success_time) > api_timeout
+
+                        if not RISK_SCORE_API_URL or api_is_failing:
+                            risk_score = water_level_to_risk_score(filtered_level)
+                            if risk_score is not None:
+                                update_risk_led(risk_score)
                         logger.info(
                             f"[SENSOR] Local reading raw={level}cm filtered={filtered_level:.2f}cm "
                             f"device={SENSOR_DEVICE_ID} filter={filter_status}"
@@ -508,6 +517,8 @@ def risk_led_loop():
     if IOT_API_KEY:
         headers["x-api-key"] = IOT_API_KEY
 
+    global api_last_success_time
+
     while not stop_event.is_set():
         try:
             response = requests.get(
@@ -517,6 +528,7 @@ def risk_led_loop():
             data = response.json()
             score = data.get("risk_score")
             if score is not None:
+                api_last_success_time = time.monotonic()
                 update_risk_led(score)
                 logger.debug(f"[LED] API risk score={score}")
             else:

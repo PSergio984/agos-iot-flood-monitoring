@@ -63,11 +63,11 @@ PICAMERA_AVAILABLE = False
 # Try to import picamera2 - if it fails, automatically enable mock mode
 try:
     if not MOCK:
-        from picamera2 import Picamera2
+        from picamera2 import Picamera2  # type: ignore
         # Verify at least one camera is physically detected by libcamera.
         # global_camera_info() returns [] when no hardware is connected,
         # which would cause IndexError inside Picamera2.__init__().
-        _detected = Picamera2.global_camera_info()
+        _detected = Picamera2.global_camera_info()  # type: ignore
         if _detected:
             PICAMERA_AVAILABLE = True
             print("[CAMERA] picamera2 module loaded successfully")
@@ -626,7 +626,9 @@ class PersistentCamera:
             return capture_image(path)  # use mock path
         log_ir_status()
         _ir_cut_controller.maybe_apply()
-        self._cam.capture_file(path)
+        request = self._cam.capture_request(flush=True)
+        request.save('main', path)
+        request.release()
         _apply_software_crop(path)
         _apply_clahe_night(path)
         return path

@@ -1,5 +1,4 @@
 import time
-import os
 from sensor import get_water_level, update_risk_led, water_level_to_risk_score
 
 def main():

@@ -30,7 +30,7 @@ GPIO_AVAILABLE = False
 # Try to import RPi.GPIO - if it fails, automatically enable mock mode
 try:
     if not MOCK:
-        import RPi.GPIO as GPIO  # type: ignore[import-not-found]
+        import RPi.GPIO  # type: ignore[import-not-found] # noqa: F401
 
         GPIO_AVAILABLE = True
 
