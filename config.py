@@ -25,6 +25,11 @@ def get_env_var(key: str | list[str] | tuple[str, ...], default: str = "", cast_
     return val
 
 
+# ── Standard API Endpoint Paths (Fixed Protocol Contracts) ─────────────────
+ENDPOINT_SENSOR_RECORD = "/api/v1/sensor-readings/record"
+ENDPOINT_RISK_SCORE = "/api/v1/iot/risk-score"
+ENDPOINT_WEBSOCKET_RPI = "/ws/rpi"
+
 # ── Server & Device Identity ───────────────────────────────────────────────
 BACKEND_BASE_URL = get_env_var(["BACKEND_BASE_URL", "SERVER_BASE_URL", "API_BASE_URL"], "").rstrip("/")
 LOCATION_ID = get_env_var("LOCATION_ID", "1", int)
@@ -42,12 +47,12 @@ def _derive_websocket_url() -> str:
     parsed = urllib.parse.urlparse(BACKEND_BASE_URL)
     ws_scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
     netloc = parsed.netloc or parsed.path
-    return f"{ws_scheme}://{netloc}/ws/rpi?camera_device_id={CAMERA_DEVICE_ID}&location_id={LOCATION_ID}"
+    return f"{ws_scheme}://{netloc}{ENDPOINT_WEBSOCKET_RPI}?camera_device_id={CAMERA_DEVICE_ID}&location_id={LOCATION_ID}"
 
 
 SERVER_URL = get_env_var(
     "SERVER_URL",
-    f"{BACKEND_BASE_URL}/api/v1/sensor-readings/record" if BACKEND_BASE_URL else "http://localhost:8000/api/v1/sensor-readings/record",
+    f"{BACKEND_BASE_URL}{ENDPOINT_SENSOR_RECORD}" if BACKEND_BASE_URL else f"http://localhost:8000{ENDPOINT_SENSOR_RECORD}",
 )
 WEBSOCKET_SERVER_URL = _derive_websocket_url()
 
@@ -133,7 +138,7 @@ FRAME_QUALITY_RESIZE_WIDTH = get_env_var("FRAME_QUALITY_RESIZE_WIDTH", "320", in
 # Fusion & Decision Engine API (auto-derived from BACKEND_BASE_URL if set)
 RISK_SCORE_API_URL = get_env_var(
     "RISK_SCORE_API_URL",
-    f"{BACKEND_BASE_URL}/api/v1/iot/risk-score?location_id={LOCATION_ID}" if BACKEND_BASE_URL else "",
+    f"{BACKEND_BASE_URL}{ENDPOINT_RISK_SCORE}?location_id={LOCATION_ID}" if BACKEND_BASE_URL else "",
 )
 RISK_SCORE_POLL_INTERVAL = get_env_var("RISK_SCORE_POLL_INTERVAL", "10.0", float)
 
