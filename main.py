@@ -61,6 +61,9 @@ logger = logging.getLogger(__name__)
 SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
 WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
 
+# Shared HTTP session for connection reuse / keep-alive
+_http_session = requests.Session()
+
 # Track active API polling status to prevent race conditions with sensor fallback LED updates
 api_last_success_time = 0.0
 
@@ -275,6 +278,7 @@ class PersistentWebSocketClient:
                     msg = ws.recv()
                     if msg:
                         logger.debug(f"[WS] Message received from server: {str(msg)[:80]}")
+                        self._handle_incoming_message(msg)
             except (ws_timeout_exc, socket.timeout, TimeoutError):
                 continue
             except (ws_closed_exc, OSError, Exception) as e:
@@ -284,6 +288,28 @@ class PersistentWebSocketClient:
                         if self._ws is ws:
                             self._close_locked()
                 break
+
+    def _handle_incoming_message(self, msg):
+        """Parse incoming push notifications/commands from backend (e.g. risk score updates)."""
+        global api_last_success_time
+        if not msg:
+            return
+        try:
+            data = json.loads(msg) if isinstance(msg, (str, bytes, bytearray)) else msg
+            if isinstance(data, dict):
+                score = data.get("risk_score")
+                if score is None and data.get("type") in ("risk_score", "risk_update", "risk"):
+                    score = data.get("score")
+                if score is not None:
+                    try:
+                        score_val = float(score)
+                        api_last_success_time = time.monotonic()
+                        update_risk_led(score_val)
+                        logger.info(f"[WS] Real-time risk score update received via WebSocket: {score_val}")
+                    except (ValueError, TypeError) as parse_err:
+                        logger.warning(f"[WS] Invalid score value in risk push message: {parse_err}")
+        except Exception as e:
+            logger.debug(f"[WS] Non-JSON or unhandled message from server: {e}")
 
     def _close_locked(self):
         if self._ws is not None:
@@ -478,6 +504,10 @@ def signal_handler(sig, frame):
     stop_event.set()
     if _ws_client is not None:
         _ws_client.close()
+    try:
+        _http_session.close()
+    except Exception:
+        pass
 
 
 def sensor_loop():
@@ -540,7 +570,7 @@ def sensor_loop():
                                 "signal_strength": 100,
                                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                             }
-                            response = requests.post(SERVER_URL, json=payload, headers=headers, timeout=5)
+                            response = _http_session.post(SERVER_URL, json=payload, headers=headers, timeout=5)
                             if response.status_code == 429:
                                 logger.warning(
                                     "[SENSOR] API rate-limited (429). "
@@ -724,7 +754,7 @@ def risk_led_loop():
 
     while not stop_event.is_set():
         try:
-            response = requests.get(
+            response = _http_session.get(
                 RISK_SCORE_API_URL, headers=headers, timeout=5
             )
             response.raise_for_status()
@@ -776,4 +806,8 @@ if __name__ == "__main__":
     risk_led_thread.join()
     if _ws_client is not None:
         _ws_client.close()
+    try:
+        _http_session.close()
+    except Exception:
+        pass
     logger.info("AGOS stopped.")

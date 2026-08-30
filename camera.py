@@ -280,11 +280,19 @@ def _write_minimal_jpeg(path: str) -> None:
                b'\xd2\xcf \xff\xd9')
 
 
+def _get_temp_dir() -> str:
+    """Return /dev/shm if available and writable (RAM disk on Linux), otherwise fallback to tempfile.gettempdir()."""
+    shm_dir = "/dev/shm"
+    if os.path.exists(shm_dir) and os.path.isdir(shm_dir) and os.access(shm_dir, os.W_OK):
+        return shm_dir
+    return tempfile.gettempdir()
+
+
 def build_ir_status_image(path: str | None = None, now: datetime.datetime | None = None) -> str:
     """Generate a status image describing day/night and IR expectations."""
     if path is None:
         ts = _ir_now(now).strftime("%Y%m%d_%H%M%S_%f")
-        path = os.path.join(tempfile.gettempdir(), f"ir_status_{ts}.jpg")
+        path = os.path.join(_get_temp_dir(), f"ir_status_{ts}.jpg")
 
     snapshot = get_ir_status_snapshot(now)
 
@@ -396,7 +404,10 @@ def _create_camera():
 def _build_quality_controls():
     """Build controls dict with ScalerCrop, image quality, and exposure settings."""
     controls = {}
-    if CAMERA_NO_CROP:
+    if IMAGE_CROP_ENABLED:
+        # Hardware ISP crop directly from sensor coordinate frame (e.g. 2592x1944 on OV5647)
+        controls["ScalerCrop"] = (IMAGE_CROP_X, IMAGE_CROP_Y, IMAGE_CROP_WIDTH, IMAGE_CROP_HEIGHT)
+    elif CAMERA_NO_CROP:
         controls["ScalerCrop"] = (0, 0, CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT)
 
     # Image quality enhancements
@@ -425,8 +436,16 @@ def _build_quality_controls():
 
 
 def _apply_software_crop(path):
-    """Crop the saved image to the defined Region of Interest (ROI) if enabled."""
+    """Crop the saved image to the defined Region of Interest (ROI) if enabled.
+
+    When real camera hardware (Picamera2) is active, the crop is handled directly
+    in hardware via ScalerCrop control, so software re-encoding is bypassed.
+    Software crop is preserved for mock/fallback modes.
+    """
     if not IMAGE_CROP_ENABLED or not os.path.exists(path):
+        return
+    # If hardware ISP crop was already applied by Picamera2, skip OpenCV software pass
+    if not MOCK and PICAMERA_AVAILABLE:
         return
     try:
         import cv2
@@ -488,9 +507,9 @@ def _apply_clahe_night(path):
 
 
 def capture_image(path=None):
-    # Use cross-platform temporary directory if path not specified
+    # Use cross-platform temporary directory if path not specified (prefers /dev/shm RAM disk)
     if path is None:
-        temp_dir = tempfile.gettempdir()
+        temp_dir = _get_temp_dir()
         path = os.path.join(temp_dir, "frame.jpg")
     if MOCK or not PICAMERA_AVAILABLE:
         # Prefer training data when no physical camera is available so the rest
@@ -621,7 +640,7 @@ class PersistentCamera:
         if path is None:
             import datetime
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            path = os.path.join(tempfile.gettempdir(), f"frame_{ts}.jpg")
+            path = os.path.join(_get_temp_dir(), f"frame_{ts}.jpg")
         if MOCK or not PICAMERA_AVAILABLE or self._cam is None:
             return capture_image(path)  # use mock path
         log_ir_status()

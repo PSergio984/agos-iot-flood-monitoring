@@ -467,6 +467,33 @@ def test_persistent_websocket_heartbeat_worker(tmp_path):
     assert client._stop_reader.is_set()
 
 
+def test_persistent_websocket_client_handles_push_risk_score(monkeypatch):
+    updated_scores = []
+    monkeypatch.setattr(main, "update_risk_led", lambda s: updated_scores.append(s))
+
+    client = main.PersistentWebSocketClient(url="ws://localhost:9999/ws")
+
+    # Valid risk_score payload
+    client._handle_incoming_message(json.dumps({"type": "risk_score", "risk_score": 80}))
+    assert updated_scores == [80.0]
+
+    # Valid risk_update with score key
+    client._handle_incoming_message(json.dumps({"type": "risk_update", "score": 45.5}))
+    assert updated_scores == [80.0, 45.5]
+
+    # Malformed or non-risk messages are handled gracefully without raising
+    client._handle_incoming_message("not-json")
+    client._handle_incoming_message(json.dumps({"type": "unrelated", "data": 123}))
+    client._handle_incoming_message(json.dumps({"type": "risk_score", "score": "invalid"}))
+    assert len(updated_scores) == 2
+
+
+def test_http_session_reused_in_main():
+    import requests
+    assert isinstance(main._http_session, requests.Session)
+
+
+
 
 
 

@@ -171,3 +171,42 @@ def test_camera_gain_environment_parsing(monkeypatch):
     importlib.reload(camera)
     assert camera.CAMERA_ANALOGUE_GAIN == 0.0
 
+
+def test_get_temp_dir_prioritizes_shm(monkeypatch):
+    monkeypatch.setattr(camera.os.path, "exists", lambda p: p == "/dev/shm")
+    monkeypatch.setattr(camera.os.path, "isdir", lambda p: p == "/dev/shm")
+    monkeypatch.setattr(camera.os, "access", lambda p, mode: p == "/dev/shm")
+
+    assert camera._get_temp_dir() == "/dev/shm"
+
+
+def test_get_temp_dir_falls_back_when_no_shm(monkeypatch):
+    monkeypatch.setattr(camera.os.path, "exists", lambda p: False)
+    assert camera._get_temp_dir() == camera.tempfile.gettempdir()
+
+
+def test_build_quality_controls_includes_scaler_crop_when_crop_enabled(monkeypatch):
+    monkeypatch.setattr(camera, "IMAGE_CROP_ENABLED", True)
+    monkeypatch.setattr(camera, "IMAGE_CROP_X", 260)
+    monkeypatch.setattr(camera, "IMAGE_CROP_Y", 0)
+    monkeypatch.setattr(camera, "IMAGE_CROP_WIDTH", 770)
+    monkeypatch.setattr(camera, "IMAGE_CROP_HEIGHT", 680)
+
+    controls = camera._build_quality_controls()
+    assert controls["ScalerCrop"] == (260, 0, 770, 680)
+
+
+def test_apply_software_crop_bypasses_on_hardware(monkeypatch):
+    monkeypatch.setattr(camera, "IMAGE_CROP_ENABLED", True)
+    monkeypatch.setattr(camera, "MOCK", False)
+    monkeypatch.setattr(camera, "PICAMERA_AVAILABLE", True)
+    monkeypatch.setattr(camera.os.path, "exists", lambda p: True)
+
+    cv2_called = False
+    fake_cv2 = type("FakeCV2", (), {"imread": lambda p: (_ for _ in ()).throw(AssertionError("cv2 should not be called"))})
+    monkeypatch.setattr(camera, "cv2", fake_cv2, raising=False)
+
+    # Should return early without calling cv2
+    camera._apply_software_crop("some_path.jpg")
+
+
