@@ -1,12 +1,18 @@
-"""
-This script allows you to capture a rapid burst of images (e.g., 10 frames over 10 seconds)
+"""AGOS Rapid Burst Capture Tool
+=============================
+Captures a fast sequence of frames with PersistentCamera (e.g., water spray,
+debris testing, dynamic flow changes) and optionally uploads to Cloudinary in parallel.
+
 Usage:
-    python burst_capture.py             # Default: 10 images, 1 second apart
-    python burst_capture.py --count 20  # Capture 20 images
-    python burst_capture.py --delay 0.5 # Capture every 0.5 seconds
+    python burst_capture.py                      # Default: 10 images, 1s apart, label=raining
+    python burst_capture.py --count 20 --delay 0.5
+    python burst_capture.py --label debris_blocked --count 15
+    python burst_capture.py --no-upload          # Local only
+    python burst_capture.py --workers 4          # 4 parallel Cloudinary upload threads
 """
 
 import argparse
+import concurrent.futures
 import datetime
 import os
 import sys
@@ -17,6 +23,7 @@ import cloudinary.uploader
 from dotenv import load_dotenv
 
 from camera import PersistentCamera
+from frame_quality import get_frame_quality_metrics
 
 load_dotenv()
 
@@ -30,32 +37,71 @@ cloudinary.config(
     api_secret=API_SECRET,
 )
 
-LOCAL_BACKUP_DIR = "training_raining2"
-CLOUD_FOLDER = "agos/training_raining2"
-
 
 def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def upload_to_cloudinary(filepath, session_id):
+def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None):
     """Upload a single image to Cloudinary."""
-    tags = ["training", f"session_{session_id}", "raining"]
+    folder = cloud_folder or f"agos/training_{label}"
+    tags = ["training", f"session_{session_id}", label]
     try:
-        cloudinary.uploader.upload(
+        res = cloudinary.uploader.upload(
             filepath,
-            folder=CLOUD_FOLDER,
+            folder=folder,
             tags=tags,
-            context=f"session={session_id}",
+            context=f"session={session_id}|label={label}",
         )
-        return True
+        return True, filepath, res.get("secure_url")
     except Exception as e:
-        print(f"    [FAIL] Upload error: {e}")
-        return False
+        return False, filepath, str(e)
+
+
+def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=None, max_workers=4):
+    """Upload list of image filepaths concurrently using ThreadPoolExecutor."""
+    if not filepaths:
+        return []
+
+    workers = max(1, min(max_workers, len(filepaths)))
+    print(f"\n[CLOUD] Uploading {len(filepaths)} images to Cloudinary ({workers} parallel workers)...")
+
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(upload_to_cloudinary, fp, session_id, label, cloud_folder): fp
+            for fp in filepaths
+        }
+        completed = 0
+        for future in concurrent.futures.as_completed(future_map):
+            completed += 1
+            ok, fp, detail = future.result()
+            results.append((ok, fp, detail))
+            status_tag = "[OK]" if ok else "[FAIL]"
+            fname = os.path.basename(fp)
+            if ok:
+                print(f"  [{completed}/{len(filepaths)}] {status_tag} Uploaded {fname}")
+            else:
+                print(f"  [{completed}/{len(filepaths)}] {status_tag} Failed {fname}: {detail}")
+
+    success_count = sum(1 for ok, _, _ in results if ok)
+    print(f"[CLOUD] Uploads complete: {success_count}/{len(filepaths)} successful!")
+    return results
+
+
+def run_countdown(seconds: int = 3):
+    """Visual countdown in terminal so user can prepare."""
+    if seconds <= 0:
+        return
+    print()
+    for s in range(seconds, 0, -1):
+        print(f"  Starting in {s}...", end="\r", flush=True)
+        time.sleep(1.0)
+    print("  Starting NOW!       \n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Defense Burst Capture")
+    parser = argparse.ArgumentParser(description="AGOS Rapid Burst Capture")
     parser.add_argument(
         "-c",
         "--count",
@@ -71,60 +117,107 @@ def main():
         help="Seconds to wait between captures (default: 1.0)",
     )
     parser.add_argument(
-        "--no-upload", action="store_true", help="Skip uploading to Cloudinary"
+        "-l",
+        "--label",
+        type=str,
+        default="raining",
+        help="Dataset label / scenario tag (default: raining)",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Local directory to store captures (default: training_{label})",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Concurrent Cloudinary upload workers (default: 4)",
+    )
+    parser.add_argument(
+        "--countdown",
+        type=int,
+        default=3,
+        help="Countdown seconds before starting capture (default: 3, 0 to disable)",
+    )
+    parser.add_argument(
+        "--no-upload",
+        action="store_true",
+        help="Skip uploading to Cloudinary (save locally only)",
     )
     args = parser.parse_args()
 
-    _ensure_dir(LOCAL_BACKUP_DIR)
+    label = args.label.strip().lower()
+    output_dir = args.output_dir or f"training_{label}"
+    cloud_folder = f"agos/training_{label}"
+
+    _ensure_dir(output_dir)
     session_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     print("\n========================================================")
-    print("  AGOS Defense Burst Capture (Water Spray Test)")
+    print(f"  AGOS Burst Capture — [{label.upper()}]")
     print("========================================================")
-    print(f"  Target: {args.count} images")
-    print(f"  Speed:  1 image every {args.delay} seconds")
-    print(f"  Folder: ./{LOCAL_BACKUP_DIR}/")
-    print(f"  Upload: {'Disabled' if args.no_upload else 'Enabled (after capture)'}")
+    print(f"  Target:     {args.count} images")
+    print(f"  Interval:   1 image every {args.delay} seconds")
+    print(f"  Label/Tag:  {label}")
+    print(f"  Folder:     ./{output_dir}/")
+    print(f"  Cloud:      {'Disabled' if args.no_upload else f'{cloud_folder} ({args.workers} workers)'}")
     print("========================================================\n")
 
-    input("Press ENTER to START the burst capture (then start spraying!)...")
+    input("Press ENTER to start the burst sequence...")
+    run_countdown(args.countdown)
 
-    print("\n[CAMERA] Warming up camera...")
+    print("[CAMERA] Initializing camera...")
     captured_files = []
+    metrics_list = []
 
     with PersistentCamera() as cam:
-        print("\n[START] Burst capture sequence initiated!\n")
-
+        print("[START] Sequence started!\n")
         for i in range(1, args.count + 1):
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-            filename = f"burst_{session_id}_{i:03d}_{timestamp}.jpg"
-            filepath = os.path.join(LOCAL_BACKUP_DIR, filename)
+            filename = f"burst_{label}_{session_id}_{i:03d}_{timestamp}.jpg"
+            filepath = os.path.join(output_dir, filename)
 
             try:
-                # Capture frame
                 cam.capture(filepath)
-                print(f"  [{i}/{args.count}] Captured: {filename}")
+                metrics = get_frame_quality_metrics(filepath)
+                if metrics:
+                    metrics_list.append(metrics)
+                    bright = metrics.get("brightness", 0.0)
+                    sharp = metrics.get("laplacian_var", 0.0)
+                    print(f"  [{i}/{args.count}] Captured: {filename} (brightness={bright:.1f}, sharpness={sharp:.1f})")
+                else:
+                    print(f"  [{i}/{args.count}] Captured: {filename}")
                 captured_files.append(filepath)
             except Exception as e:
                 print(f"  [{i}/{args.count}] [ERROR] Capture failed: {e}")
 
-            # Wait before next capture (skip delay on the last image)
             if i < args.count:
                 time.sleep(args.delay)
 
-    print("\n[DONE] Burst capture complete!")
+    print(f"\n[DONE] Captured {len(captured_files)}/{args.count} images in ./{output_dir}/")
+
+    # Quality summary
+    if metrics_list:
+        avg_bright = sum(m["brightness"] for m in metrics_list) / len(metrics_list)
+        avg_sharp = sum(m["laplacian_var"] for m in metrics_list) / len(metrics_list)
+        avg_contrast = sum(m["contrast_stddev"] for m in metrics_list) / len(metrics_list)
+        print(f"\n--- Quality Stats (avg across {len(metrics_list)} frames) ---")
+        print(f"  Brightness: {avg_bright:.1f} | Sharpness (Laplacian): {avg_sharp:.1f} | Contrast: {avg_contrast:.1f}")
 
     # Upload phase
     if not args.no_upload and captured_files:
-        print(f"\n[CLOUD] Uploading {len(captured_files)} images to Cloudinary...")
-        for i, filepath in enumerate(captured_files, 1):
-            print(
-                f"  [{i}/{len(captured_files)}] Uploading {os.path.basename(filepath)}..."
-            )
-            upload_to_cloudinary(filepath, session_id)
-        print("[CLOUD] Uploads complete!")
+        upload_all_concurrent(
+            captured_files,
+            session_id=session_id,
+            label=label,
+            cloud_folder=cloud_folder,
+            max_workers=args.workers,
+        )
 
-    print("\n[SUCCESS] Check your training_captures/ folder or Cloudinary dashboard.")
+    print(f"\n[SUCCESS] Check ./{output_dir}/ or your Cloudinary dashboard ({cloud_folder}).")
 
 
 if __name__ == "__main__":
@@ -133,3 +226,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\n[INFO] Burst capture interrupted by user. Exiting.")
         sys.exit(0)
+
