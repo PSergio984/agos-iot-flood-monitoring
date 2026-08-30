@@ -28,7 +28,7 @@ CAMERA_SHARPNESS         = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
 CAMERA_CONTRAST          = float(os.getenv("CAMERA_CONTRAST", "1.0"))
 CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
 CAMERA_EXPOSURE_TIME     = int(os.getenv("CAMERA_EXPOSURE_TIME", "0"))    # µs; 0 = auto
-CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", "0"))  # 0 = auto
+CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", os.getenv("CAMERA_ANALOG_GAIN", "0")))  # 0 = auto
 CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
 CAMERA_EXPOSURE_VALUE_DAY   = float(os.getenv("CAMERA_EXPOSURE_VALUE_DAY", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
 CAMERA_EXPOSURE_VALUE_NIGHT = float(os.getenv("CAMERA_EXPOSURE_VALUE_NIGHT", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
