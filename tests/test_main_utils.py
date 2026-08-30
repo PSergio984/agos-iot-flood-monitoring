@@ -38,9 +38,12 @@ class FakeWebsocketModule:
         self.fake_ws = fake_ws or FakeWS()
         self.create_fn = create_fn
 
-    def create_connection(self, _url, timeout):
+    def create_connection(self, _url, timeout, **kwargs):
         if self.create_fn:
-            return self.create_fn(_url, timeout)
+            try:
+                return self.create_fn(_url, timeout, **kwargs)
+            except TypeError:
+                return self.create_fn(_url, timeout)
         assert timeout == 10
         return self.fake_ws
 
@@ -141,7 +144,7 @@ def test_send_image_websocket_reuses_connection(monkeypatch, tmp_path):
     connect_count = 0
     fake_ws = FakeWS()
 
-    def _create(_url, timeout):
+    def _create(_url, timeout, **kwargs):
         nonlocal connect_count
         connect_count += 1
         return fake_ws
@@ -165,7 +168,7 @@ def test_send_image_websocket_timeout_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    def _timeout(_url, _timeout):
+    def _timeout(_url, _timeout, **kwargs):
         raise FakeWebsocketModule.WebSocketTimeoutException("timeout")
 
     fake_module = FakeWebsocketModule(create_fn=_timeout)
@@ -181,7 +184,7 @@ def test_send_image_websocket_closed_connection_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    def _closed(_url, _timeout):
+    def _closed(_url, _timeout, **kwargs):
         raise FakeWebsocketModule.WebSocketConnectionClosedException("closed")
 
     fake_module = FakeWebsocketModule(create_fn=_closed)
@@ -202,7 +205,7 @@ def test_send_image_websocket_oserror_path(monkeypatch, tmp_path):
         WebSocketConnectionClosedException=RuntimeError,
     )
 
-    def _raise(_url, timeout):
+    def _raise(_url, timeout, **kwargs):
         raise OSError("network down")
 
     fake_module.create_connection = _raise
@@ -214,13 +217,13 @@ def test_send_image_websocket_oserror_path(monkeypatch, tmp_path):
     assert main.send_image_websocket(str(image)) is False
 
 
-def test_send_image_websocket_reconnects_after_send_error(monkeypatch, tmp_path):
+def test_send_image_websocket_reconnects_immediately_after_send_error(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
     socket_instances = [FakeWS(should_fail=True), FakeWS(should_fail=False)]
 
-    def _create(_url, timeout):
+    def _create(_url, timeout, **kwargs):
         return socket_instances.pop(0)
 
     fake_module = FakeWebsocketModule(create_fn=_create)
@@ -230,11 +233,29 @@ def test_send_image_websocket_reconnects_after_send_error(monkeypatch, tmp_path)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
 
-    # First send fails due to broken pipe -> resets socket
-    assert main.send_image_websocket(str(image)) is False
-
-    # Second send auto-reconnects with new socket and succeeds
+    # First send encounters broken pipe on 1st socket, reconnects immediately to 2nd socket, and succeeds
     assert main.send_image_websocket(str(image)) is True
+    main.get_ws_client().close()
+
+
+def test_send_image_websocket_fails_if_reconnect_also_fails(monkeypatch, tmp_path):
+    image = tmp_path / "img.jpg"
+    image.write_bytes(b"jpeg-bytes")
+
+    socket_instances = [FakeWS(should_fail=True), FakeWS(should_fail=True)]
+
+    def _create(_url, timeout, **kwargs):
+        return socket_instances.pop(0)
+
+    fake_module = FakeWebsocketModule(create_fn=_create)
+
+    monkeypatch.setattr(main, "_websocket", fake_module)
+    monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
+    monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
+    monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
+
+    # Both initial and retry fail -> returns False
+    assert main.send_image_websocket(str(image)) is False
     main.get_ws_client().close()
 
 

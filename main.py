@@ -17,6 +17,8 @@ from config import (
     ENABLE_CLOUDINARY_UPLOAD,
     ENABLE_WEBSOCKET_SEND,
     WS_SEND_METADATA_FIRST,
+    WS_PING_INTERVAL,
+    WS_PING_TIMEOUT,
     CAMERA_SEND_PRECAPTURE_STATUS_IMAGE,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
@@ -204,11 +206,15 @@ class PersistentWebSocketClient:
         url: str,
         sensor_device_id: int = SENSOR_DEVICE_ID,
         send_metadata_first: bool = WS_SEND_METADATA_FIRST,
+        ping_interval: int = WS_PING_INTERVAL,
+        ping_timeout: int = WS_PING_TIMEOUT,
         ws_module = _websocket,
     ):
         self.url = url
         self.sensor_device_id = sensor_device_id
         self.send_metadata_first = send_metadata_first
+        self.ping_interval = ping_interval
+        self.ping_timeout = ping_timeout
         self.ws_module = ws_module
         self._ws = None
         self._lock = threading.Lock()
@@ -244,7 +250,11 @@ class PersistentWebSocketClient:
 
         try:
             logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
-            self._ws = self.ws_module.create_connection(self.url, timeout=10)
+            extra_kwargs = {}
+            if self.ping_interval > 0:
+                extra_kwargs["ping_interval"] = self.ping_interval
+                extra_kwargs["ping_timeout"] = self.ping_timeout
+            self._ws = self.ws_module.create_connection(self.url, timeout=10, **extra_kwargs)
             logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
             return self._ws
         except ws_timeout_exc:
@@ -282,43 +292,43 @@ class PersistentWebSocketClient:
         ws_timeout_exc, ws_closed_exc = self._get_exceptions()
 
         with self._lock:
-            ws = self._get_connection_locked()
-            if ws is None:
-                return False
+            for attempt in range(2):
+                ws = self._get_connection_locked()
+                if ws is None:
+                    return False
 
-            metadata = {
-                "type": "image",
-                "sensor_device_id": self.sensor_device_id,
-                "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "filename": os.path.basename(image_path),
-                "size": len(image_data),
-                "cloudinary_url": cloudinary_url,
-            }
-            if extra_metadata:
-                metadata.update(extra_metadata)
+                metadata = {
+                    "type": "image",
+                    "sensor_device_id": self.sensor_device_id,
+                    "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "filename": os.path.basename(image_path),
+                    "size": len(image_data),
+                    "cloudinary_url": cloudinary_url,
+                }
+                if extra_metadata:
+                    metadata.update(extra_metadata)
 
-            try:
-                if self.send_metadata_first:
-                    ws.send(json.dumps(metadata))
-                ws.send_binary(image_data)
+                try:
+                    if self.send_metadata_first:
+                        ws.send(json.dumps(metadata))
+                    ws.send_binary(image_data)
 
-                logger.info(
-                    f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(self.url)} "
-                    f"(metadata_first={self.send_metadata_first})"
-                )
-                return True
-            except ws_timeout_exc:
-                logger.error(f"[WS] Send timed out, resetting connection: {_safe_ws_url(self.url)}")
-                self._close_locked()
-            except ws_closed_exc as e:
-                logger.error(f"[WS] Connection closed during send: {e}")
-                self._close_locked()
-            except OSError as e:
-                logger.error(f"[WS] Network error during send: {e}")
-                self._close_locked()
-            except Exception as e:
-                logger.error(f"[WS] Failed to send image: {e}")
-                self._close_locked()
+                    retry_tag = " (retry succeeded)" if attempt > 0 else ""
+                    logger.info(
+                        f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(self.url)} "
+                        f"(metadata_first={self.send_metadata_first}){retry_tag}"
+                    )
+                    return True
+                except (ws_timeout_exc, ws_closed_exc, OSError, Exception) as e:
+                    self._close_locked()
+                    if attempt == 0:
+                        logger.warning(
+                            f"[WS] Connection dropped during send ({e}), reconnecting immediately for retry..."
+                        )
+                        continue
+                    else:
+                        logger.error(f"[WS] Failed to send image after reconnect retry: {e}")
+                        return False
 
         return False
 
