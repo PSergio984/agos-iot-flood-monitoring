@@ -500,6 +500,30 @@ def sensor_loop():
         stop_event.wait(max(0.0, SENSOR_INTERVAL - elapsed))
 
 
+def _evaluate_and_gate_frame(path: str, context_label: str = "") -> bool:
+    """Assess frame quality, trigger night vision if dark/obscured, and gate unusable frames.
+
+    Returns True if frame is usable and should be sent/uploaded, False if dropped.
+    """
+    metrics = get_frame_quality_metrics(path)
+    if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
+        force_night_vision()
+        logger.info(
+            f"[CAMERA] Environment dark/obscured — activated night vision "
+            f"(brightness={metrics['brightness']:.1f} contrast={metrics['contrast_stddev']:.1f} "
+            f"laplacian={metrics['laplacian_var']:.1f})"
+        )
+
+    if not is_frame_usable(path):
+        tag = f" [{context_label}]" if context_label else ""
+        logger.warning(
+            f"[CAMERA] Dropped frame {path}{tag} (quality gate): "
+            f"{_format_frame_metrics(metrics)}"
+        )
+        return False
+    return True
+
+
 def camera_loop():
     """Capture frames, upload to Cloudinary, and stream via WebSocket at CAMERA_INTERVAL.
 
@@ -529,21 +553,7 @@ def camera_loop():
                 if path is None:
                     logger.warning("[CAMERA] No images available in any enabled source folder")
                 else:
-                    # ── Environment sensing (reuses existing quality metrics) ──
-                    metrics = get_frame_quality_metrics(str(path))
-                    if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
-                        force_night_vision()
-                        logger.info(
-                            f"[CAMERA] Environment dark/obscured — activated night vision "
-                            f"(brightness={metrics['brightness']:.1f} contrast={metrics['contrast_stddev']:.1f} "
-                            f"laplacian={metrics['laplacian_var']:.1f})"
-                        )
-
-                    if not is_frame_usable(str(path)):
-                        logger.warning(
-                            f"[CAMERA] Dropped frame {path} [{source_label}] (quality gate): "
-                            f"{_format_frame_metrics(metrics)}"
-                        )
+                    if not _evaluate_and_gate_frame(str(path), context_label=source_label):
                         stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
                         continue
 
@@ -580,20 +590,7 @@ def camera_loop():
                     _send_precapture_status_image()
                     path = cam.capture()
 
-                    # ── Environment sensing (reuses existing quality metrics) ──
-                    metrics = get_frame_quality_metrics(path)
-                    if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
-                        force_night_vision()
-                        logger.info(
-                            f"[CAMERA] Environment dark/obscured — activated night vision "
-                            f"(brightness={metrics['brightness']:.1f} contrast={metrics['contrast_stddev']:.1f} "
-                            f"laplacian={metrics['laplacian_var']:.1f})"
-                        )
-
-                    if not is_frame_usable(path):
-                        logger.warning(
-                            f"[CAMERA] Dropped frame {path} (quality gate): {_format_frame_metrics(metrics)}"
-                        )
+                    if not _evaluate_and_gate_frame(path):
                         stop_event.wait(max(0.0, CAMERA_INTERVAL - (time.monotonic() - t0)))
                         continue
 

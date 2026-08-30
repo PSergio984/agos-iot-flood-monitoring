@@ -11,51 +11,51 @@ try:
 except Exception:
     ZoneInfo = None
 
-from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR
+from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR, get_env_var
 
-CAMERA_WIDTH         = int((os.getenv("CAMERA_WIDTH") or "1296").strip() or "1296")
-CAMERA_HEIGHT        = int((os.getenv("CAMERA_HEIGHT") or "972").strip() or "972")
-CAMERA_NO_CROP       = (os.getenv("CAMERA_NO_CROP") or "true").strip().lower() == "true"
-CAMERA_SENSOR_WIDTH  = int((os.getenv("CAMERA_SENSOR_WIDTH") or "2592").strip() or "2592")
-CAMERA_SENSOR_HEIGHT = int((os.getenv("CAMERA_SENSOR_HEIGHT") or "1944").strip() or "1944")
-CAMERA_LOG_SCALERCROP = (os.getenv("CAMERA_LOG_SCALERCROP") or "false").strip().lower() == "true"
+CAMERA_WIDTH         = get_env_var("CAMERA_WIDTH", "1296", int)
+CAMERA_HEIGHT        = get_env_var("CAMERA_HEIGHT", "972", int)
+CAMERA_NO_CROP       = get_env_var("CAMERA_NO_CROP", "true", bool)
+CAMERA_SENSOR_WIDTH  = get_env_var("CAMERA_SENSOR_WIDTH", "2592", int)
+CAMERA_SENSOR_HEIGHT = get_env_var("CAMERA_SENSOR_HEIGHT", "1944", int)
+CAMERA_LOG_SCALERCROP = get_env_var("CAMERA_LOG_SCALERCROP", "false", bool)
 
 # ── Image quality settings ───────────────────────────────────────────────────
-CAMERA_JPEG_QUALITY      = int((os.getenv("CAMERA_JPEG_QUALITY") or "80").strip() or "80")
-CAMERA_TUNING_FILE_DAY   = (os.getenv("CAMERA_TUNING_FILE_DAY") or os.getenv("CAMERA_TUNING_FILE") or "").strip()
-CAMERA_TUNING_FILE_NIGHT = (os.getenv("CAMERA_TUNING_FILE_NIGHT") or os.getenv("CAMERA_TUNING_FILE") or "").strip()
-CAMERA_SHARPNESS         = float((os.getenv("CAMERA_SHARPNESS") or "1.0").strip() or "1.0")
-CAMERA_CONTRAST          = float((os.getenv("CAMERA_CONTRAST") or "1.0").strip() or "1.0")
-CAMERA_SATURATION        = float((os.getenv("CAMERA_SATURATION") or "1.0").strip() or "1.0")
-CAMERA_EXPOSURE_TIME     = int((os.getenv("CAMERA_EXPOSURE_TIME") or "0").strip() or "0")    # µs; 0 = auto
-CAMERA_ANALOGUE_GAIN     = float((os.getenv("CAMERA_ANALOGUE_GAIN") or os.getenv("CAMERA_ANALOG_GAIN") or "0").strip() or "0")  # 0 = auto
-CAMERA_FRAME_DURATION_MAX = int((os.getenv("CAMERA_FRAME_DURATION_MAX") or "500000").strip() or "500000")  # µs
-CAMERA_EXPOSURE_VALUE_DAY   = float((os.getenv("CAMERA_EXPOSURE_VALUE_DAY") or os.getenv("CAMERA_EXPOSURE_VALUE") or "0.0").strip() or "0.0")
-CAMERA_EXPOSURE_VALUE_NIGHT = float((os.getenv("CAMERA_EXPOSURE_VALUE_NIGHT") or os.getenv("CAMERA_EXPOSURE_VALUE") or "0.0").strip() or "0.0")
+CAMERA_JPEG_QUALITY      = get_env_var("CAMERA_JPEG_QUALITY", "80", int)
+CAMERA_TUNING_FILE_DAY   = get_env_var(["CAMERA_TUNING_FILE_DAY", "CAMERA_TUNING_FILE"], "")
+CAMERA_TUNING_FILE_NIGHT = get_env_var(["CAMERA_TUNING_FILE_NIGHT", "CAMERA_TUNING_FILE"], "")
+CAMERA_SHARPNESS         = get_env_var("CAMERA_SHARPNESS", "1.0", float)
+CAMERA_CONTRAST          = get_env_var("CAMERA_CONTRAST", "1.0", float)
+CAMERA_SATURATION        = get_env_var("CAMERA_SATURATION", "1.0", float)
+CAMERA_EXPOSURE_TIME     = get_env_var("CAMERA_EXPOSURE_TIME", "0", int)    # µs; 0 = auto
+CAMERA_ANALOGUE_GAIN     = get_env_var(["CAMERA_ANALOGUE_GAIN", "CAMERA_ANALOG_GAIN"], "0", float)  # 0 = auto
+CAMERA_FRAME_DURATION_MAX = get_env_var("CAMERA_FRAME_DURATION_MAX", "500000", int)  # µs
+CAMERA_EXPOSURE_VALUE_DAY   = get_env_var(["CAMERA_EXPOSURE_VALUE_DAY", "CAMERA_EXPOSURE_VALUE"], "0.0", float)
+CAMERA_EXPOSURE_VALUE_NIGHT = get_env_var(["CAMERA_EXPOSURE_VALUE_NIGHT", "CAMERA_EXPOSURE_VALUE"], "0.0", float)
 
 # Post-capture Software Cropping
-IMAGE_CROP_ENABLED = os.getenv("IMAGE_CROP_ENABLED", "false").lower() == "true"
-IMAGE_CROP_X       = int(os.getenv("IMAGE_CROP_X", "518"))
-IMAGE_CROP_Y       = int(os.getenv("IMAGE_CROP_Y", "777"))
-IMAGE_CROP_WIDTH   = int(os.getenv("IMAGE_CROP_WIDTH", "1555"))
-IMAGE_CROP_HEIGHT  = int(os.getenv("IMAGE_CROP_HEIGHT", "972"))
+IMAGE_CROP_ENABLED = get_env_var("IMAGE_CROP_ENABLED", "false", bool)
+IMAGE_CROP_X       = get_env_var("IMAGE_CROP_X", "518", int)
+IMAGE_CROP_Y       = get_env_var("IMAGE_CROP_Y", "777", int)
+IMAGE_CROP_WIDTH   = get_env_var("IMAGE_CROP_WIDTH", "1555", int)
+IMAGE_CROP_HEIGHT  = get_env_var("IMAGE_CROP_HEIGHT", "972", int)
 
 # Post-capture Software Enhancements
-IMAGE_CLAHE_NIGHT_ENABLED = os.getenv("IMAGE_CLAHE_NIGHT_ENABLED", "true").lower() == "true"
+IMAGE_CLAHE_NIGHT_ENABLED = get_env_var("IMAGE_CLAHE_NIGHT_ENABLED", "true", bool)
 
 
 
-IR_CUT_PIN = int(os.getenv("IR_CUT_PIN", "17"))  # BCM pin; -1 to disable
-IR_CUT_MODE = os.getenv("IR_CUT_MODE", "auto").strip().lower()
-IR_CUT_TIMEZONE = os.getenv("IR_CUT_TIMEZONE", "Asia/Manila").strip()
-IR_CUT_DAY_START_HOUR = int(os.getenv("IR_CUT_DAY_START_HOUR", "6"))
-IR_CUT_NIGHT_START_HOUR = int(os.getenv("IR_CUT_NIGHT_START_HOUR", "18"))
-IR_CUT_MIN_SWITCH_INTERVAL_S = int(os.getenv("IR_CUT_MIN_SWITCH_INTERVAL_S", "30"))
-IR_CUT_DAY_HIGH = os.getenv("IR_CUT_DAY_HIGH", "true").strip().lower() == "true"
+IR_CUT_PIN = get_env_var("IR_CUT_PIN", "17", int)  # BCM pin; -1 to disable
+IR_CUT_MODE = get_env_var("IR_CUT_MODE", "auto").lower()
+IR_CUT_TIMEZONE = get_env_var("IR_CUT_TIMEZONE", "Asia/Manila")
+IR_CUT_DAY_START_HOUR = get_env_var("IR_CUT_DAY_START_HOUR", "6", int)
+IR_CUT_NIGHT_START_HOUR = get_env_var("IR_CUT_NIGHT_START_HOUR", "18", int)
+IR_CUT_MIN_SWITCH_INTERVAL_S = get_env_var("IR_CUT_MIN_SWITCH_INTERVAL_S", "30", int)
+IR_CUT_DAY_HIGH = get_env_var("IR_CUT_DAY_HIGH", "true", bool)
 
 # Check if we're explicitly in mock mode or if picamera2 is unavailable
-MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
-USE_FSWEBCAM = os.getenv("USE_FSWEBCAM", "false").lower() == "true"  # For VM testing
+MOCK = get_env_var("MOCK_MODE", "false", bool)
+USE_FSWEBCAM = get_env_var("USE_FSWEBCAM", "false", bool)  # For VM testing
 
 # Initialize PICAMERA_AVAILABLE to False by default
 PICAMERA_AVAILABLE = False

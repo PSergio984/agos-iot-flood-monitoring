@@ -46,12 +46,25 @@ class UploadResult(NamedTuple):
     detail: str
 
 
+class BurstUploadContext(NamedTuple):
+    session_id: str
+    label: str = "raining"
+    cloud_folder: str | None = None
+
+
 def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None) -> UploadResult:
+def upload_to_cloudinary(filepath, session_id_or_context, label="raining", cloud_folder=None) -> UploadResult:
     """Upload a single image to Cloudinary."""
+    if isinstance(session_id_or_context, BurstUploadContext):
+        session_id = session_id_or_context.session_id
+        label = session_id_or_context.label
+        cloud_folder = session_id_or_context.cloud_folder
+    else:
+        session_id = session_id_or_context
+
     folder = cloud_folder or f"agos/training_{label}"
     tags = ["training", f"session_{session_id}", label]
     try:
@@ -66,10 +79,16 @@ def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=Non
         return UploadResult(success=False, filepath=filepath, detail=str(e))
 
 
-def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=None, max_workers=4):
+def upload_all_concurrent(filepaths, session_id_or_context, label="raining", cloud_folder=None, max_workers=4):
     """Upload list of image filepaths concurrently using ThreadPoolExecutor."""
     if not filepaths:
         return []
+
+    context = (
+        session_id_or_context
+        if isinstance(session_id_or_context, BurstUploadContext)
+        else BurstUploadContext(session_id=str(session_id_or_context), label=label, cloud_folder=cloud_folder)
+    )
 
     workers = max(1, min(max_workers, len(filepaths)))
     print(f"\n[CLOUD] Uploading {len(filepaths)} images to Cloudinary ({workers} parallel workers)...")
@@ -77,7 +96,7 @@ def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=N
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
         future_map = {
-            executor.submit(upload_to_cloudinary, fp, session_id, label, cloud_folder): fp
+            executor.submit(upload_to_cloudinary, fp, context): fp
             for fp in filepaths
         }
         completed = 0

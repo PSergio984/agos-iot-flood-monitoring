@@ -356,4 +356,65 @@ def test_persistent_websocket_client_proactive_age_refresh(monkeypatch, tmp_path
     client.close()
 
 
+def test_config_get_env_var(monkeypatch):
+    import config
+
+    monkeypatch.setenv("TEST_STR", "  hello  ")
+    assert config.get_env_var("TEST_STR", "default") == "hello"
+
+    monkeypatch.setenv("TEST_EMPTY", "   ")
+    assert config.get_env_var("TEST_EMPTY", "default") == "default"
+
+    monkeypatch.setenv("TEST_INT", "42")
+    assert config.get_env_var("TEST_INT", "10", int) == 42
+
+    monkeypatch.setenv("TEST_FLOAT", "3.14")
+    assert config.get_env_var("TEST_FLOAT", "1.0", float) == 3.14
+
+    monkeypatch.setenv("TEST_BOOL_TRUE", "yes")
+    assert config.get_env_var("TEST_BOOL_TRUE", "false", bool) is True
+
+    monkeypatch.setenv("TEST_BOOL_FALSE", "0")
+    assert config.get_env_var("TEST_BOOL_FALSE", "true", bool) is False
+
+    # Test alias list priority
+    monkeypatch.delenv("TEST_ALIAS_PRIMARY", raising=False)
+    monkeypatch.setenv("TEST_ALIAS_SECONDARY", "found_secondary")
+    assert config.get_env_var(["TEST_ALIAS_PRIMARY", "TEST_ALIAS_SECONDARY"], "fallback") == "found_secondary"
+
+    # Test invalid cast fallback
+    monkeypatch.setenv("TEST_BAD_NUM", "not_a_number")
+    assert config.get_env_var("TEST_BAD_NUM", "99", int) == 99
+
+
+def test_evaluate_and_gate_frame(monkeypatch, tmp_path):
+    img = tmp_path / "frame.jpg"
+    img.write_bytes(b"data")
+
+    # Case 1: Normal usable frame
+    monkeypatch.setattr(main, "get_frame_quality_metrics", lambda p: {"brightness": 100.0, "contrast_stddev": 40.0, "laplacian_var": 200.0})
+    monkeypatch.setattr(main, "is_frame_dark", lambda m: False)
+    monkeypatch.setattr(main, "is_frame_obscured", lambda m: False)
+    monkeypatch.setattr(main, "is_frame_usable", lambda p: True)
+
+    night_vision_triggered = False
+    monkeypatch.setattr(main, "force_night_vision", lambda: nonlocal_trigger())
+    def nonlocal_trigger():
+        nonlocal night_vision_triggered
+        night_vision_triggered = True
+
+    assert main._evaluate_and_gate_frame(str(img), context_label="test") is True
+    assert night_vision_triggered is False
+
+    # Case 2: Dark frame triggers night vision and passes gate if usable
+    monkeypatch.setattr(main, "is_frame_dark", lambda m: True)
+    assert main._evaluate_and_gate_frame(str(img)) is True
+    assert night_vision_triggered is True
+
+    # Case 3: Unusable frame is dropped
+    monkeypatch.setattr(main, "is_frame_usable", lambda p: False)
+    assert main._evaluate_and_gate_frame(str(img), context_label="test") is False
+
+
+
 
