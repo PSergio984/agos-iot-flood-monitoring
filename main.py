@@ -314,6 +314,21 @@ class PersistentWebSocketClient:
         self._connected_at = 0.0
         return None
 
+    def matches_config(
+        self,
+        url: str,
+        sensor_device_id: int,
+        send_metadata_first: bool,
+        ws_module,
+    ) -> bool:
+        """Check if active client instance matches current runtime configuration."""
+        return (
+            self.url == url
+            and self.sensor_device_id == sensor_device_id
+            and self.send_metadata_first == send_metadata_first
+            and self.ws_module is ws_module
+        )
+
     def get_connection(self):
         """Thread-safe public getter for active connection."""
         with self._lock:
@@ -383,12 +398,11 @@ _ws_client: PersistentWebSocketClient | None = None
 
 def get_ws_client() -> PersistentWebSocketClient:
     global _ws_client
-    if (
-        _ws_client is None
-        or _ws_client.url != WEBSOCKET_SERVER_URL
-        or _ws_client.sensor_device_id != SENSOR_DEVICE_ID
-        or _ws_client.send_metadata_first != WS_SEND_METADATA_FIRST
-        or _ws_client.ws_module is not _websocket
+    if _ws_client is None or not _ws_client.matches_config(
+        url=WEBSOCKET_SERVER_URL,
+        sensor_device_id=SENSOR_DEVICE_ID,
+        send_metadata_first=WS_SEND_METADATA_FIRST,
+        ws_module=_websocket,
     ):
         if _ws_client is not None:
             _ws_client.close()

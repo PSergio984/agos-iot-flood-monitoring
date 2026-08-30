@@ -25,13 +25,8 @@ from dotenv import load_dotenv
 from typing import NamedTuple
 
 from camera import PersistentCamera
+from config import CLOUD_NAME, API_KEY, API_SECRET
 from frame_quality import get_frame_quality_metrics
-
-load_dotenv()
-
-CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
-API_KEY = os.getenv("CLOUDINARY_API_KEY")
-API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
 
 cloudinary.config(
     cloud_name=CLOUD_NAME,

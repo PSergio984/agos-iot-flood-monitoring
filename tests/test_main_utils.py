@@ -281,6 +281,14 @@ def test_persistent_websocket_client_custom_parameters(tmp_path):
     assert len(fake_ws.frames) == 2
     metadata = json.loads(fake_ws.frames[0][1])
     assert metadata["sensor_device_id"] == 42
+
+    # Verify matches_config logic
+    assert client.matches_config("ws://localhost:9999/ws", 42, True, fake_module) is True
+    assert client.matches_config("ws://other:9999/ws", 42, True, fake_module) is False
+    assert client.matches_config("ws://localhost:9999/ws", 99, True, fake_module) is False
+    assert client.matches_config("ws://localhost:9999/ws", 42, False, fake_module) is False
+    assert client.matches_config("ws://localhost:9999/ws", 42, True, None) is False
+
     client.close()
 
 
