@@ -51,7 +51,12 @@ def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None) -> UploadResult:
+def upload_to_cloudinary(
+    filepath: str,
+    session_id: str | BurstUploadContext,
+    label: str = "raining",
+    cloud_folder: str | None = None,
+) -> UploadResult:
     """Upload a single image to Cloudinary."""
     if isinstance(session_id, BurstUploadContext):
         ctx = session_id
@@ -73,7 +78,13 @@ def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=Non
         return UploadResult(success=False, filepath=filepath, detail=str(e))
 
 
-def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=None, max_workers=4):
+def upload_all_concurrent(
+    filepaths: list[str],
+    session_id: str | BurstUploadContext,
+    label: str = "raining",
+    cloud_folder: str | None = None,
+    max_workers: int = 4,
+):
     """Upload list of image filepaths concurrently using ThreadPoolExecutor."""
     if not filepaths:
         return []

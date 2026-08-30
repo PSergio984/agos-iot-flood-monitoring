@@ -58,7 +58,7 @@ SENSOR_POST_ENABLED = get_env_var("SENSOR_POST_ENABLED", "true", bool)
 # The camera loop keeps picamera2 open between captures so the 2-second
 # AEC/AWB warm-up is paid only once at startup.
 SENSOR_INTERVAL = get_env_var("SENSOR_INTERVAL", "1.0", float)   # seconds
-CAMERA_INTERVAL = get_env_var("CAMERA_INTERVAL", "0.5", float)   # seconds  (2 fps)
+CAMERA_INTERVAL = get_env_var("CAMERA_INTERVAL", "1.0", float)   # seconds  (1 fps)
 
 # ── Sensor GPIO mapping (BCM numbering) ───────────────────────────────────
 SENSOR_TRIG_PIN = get_env_var("SENSOR_TRIG_PIN", "23", int)
