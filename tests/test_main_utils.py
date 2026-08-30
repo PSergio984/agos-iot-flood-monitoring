@@ -26,6 +26,12 @@ class FakeWS:
         if self.should_fail:
             raise OSError("broken pipe")
 
+    def settimeout(self, timeout):
+        pass
+
+    def recv(self):
+        return None
+
     def close(self):
         self.closed = True
         self.connected = False
@@ -449,16 +455,17 @@ def test_persistent_websocket_heartbeat_worker(tmp_path):
     )
 
     assert client.send(str(image)) is True
-    assert client._heartbeat_thread is not None
-    assert client._heartbeat_thread.is_alive()
+    assert client._reader_thread is not None
+    assert client._reader_thread.is_alive()
 
-    # Wait briefly for the heartbeat thread to send a ping
+    # Wait briefly for the reader thread to send a ping
     import time
     time.sleep(0.12)
     assert len(pings) >= 1
 
     client.close()
-    assert client._stop_heartbeat.is_set()
+    assert client._stop_reader.is_set()
+
 
 
 
