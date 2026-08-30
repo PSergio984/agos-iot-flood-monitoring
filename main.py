@@ -230,35 +230,39 @@ class PersistentWebSocketClient:
         with self._lock:
             self._close_locked()
 
-    def get_connection(self):
+    def _get_connection_locked(self):
+        """Return active WebSocket connection or establish a new one (must hold self._lock)."""
         if not WEBSOCKET_AVAILABLE or not self.url or not self.ws_module:
             return None
 
-        with self._lock:
-            if self._ws is not None:
-                connected = getattr(self._ws, "connected", True)
-                if connected:
-                    return self._ws
-                self._close_locked()
-
-            ws_timeout_exc, ws_closed_exc = self._get_exceptions()
-
-            try:
-                logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
-                self._ws = self.ws_module.create_connection(self.url, timeout=10)
-                logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
+        if self._ws is not None:
+            if getattr(self._ws, "connected", True):
                 return self._ws
-            except ws_timeout_exc:
-                logger.error(f"[WS] Connection timed out: {_safe_ws_url(self.url)}")
-            except ws_closed_exc as e:
-                logger.error(f"[WS] Connection closed unexpectedly during connect: {e}")
-            except OSError as e:
-                logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
-            except Exception as e:
-                logger.error(f"[WS] Failed to connect: {e}")
+            self._close_locked()
 
-            self._ws = None
-            return None
+        ws_timeout_exc, ws_closed_exc = self._get_exceptions()
+
+        try:
+            logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
+            self._ws = self.ws_module.create_connection(self.url, timeout=10)
+            logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
+            return self._ws
+        except ws_timeout_exc:
+            logger.error(f"[WS] Connection timed out: {_safe_ws_url(self.url)}")
+        except ws_closed_exc as e:
+            logger.error(f"[WS] Connection closed unexpectedly during connect: {e}")
+        except OSError as e:
+            logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
+        except Exception as e:
+            logger.error(f"[WS] Failed to connect: {e}")
+
+        self._ws = None
+        return None
+
+    def get_connection(self):
+        """Thread-safe public getter for active connection."""
+        with self._lock:
+            return self._get_connection_locked()
 
     def send(self, image_path, cloudinary_url=None, extra_metadata=None):
         if not WEBSOCKET_AVAILABLE:
@@ -278,27 +282,7 @@ class PersistentWebSocketClient:
         ws_timeout_exc, ws_closed_exc = self._get_exceptions()
 
         with self._lock:
-            # Recheck/fetch connection within lock for safe thread synchronization
-            if self._ws is None or not getattr(self._ws, "connected", True):
-                self._close_locked()
-                try:
-                    logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
-                    self._ws = self.ws_module.create_connection(self.url, timeout=10)
-                    logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
-                except ws_timeout_exc:
-                    logger.error(f"[WS] Connection timed out: {_safe_ws_url(self.url)}")
-                    return False
-                except ws_closed_exc as e:
-                    logger.error(f"[WS] Connection closed unexpectedly during connect: {e}")
-                    return False
-                except OSError as e:
-                    logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
-                    return False
-                except Exception as e:
-                    logger.error(f"[WS] Failed to connect: {e}")
-                    return False
-
-            ws = self._ws
+            ws = self._get_connection_locked()
             if ws is None:
                 return False
 

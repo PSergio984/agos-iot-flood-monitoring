@@ -165,18 +165,12 @@ def test_send_image_websocket_timeout_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class TimeoutWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
+    def _timeout(_url, _timeout):
+        raise FakeWebsocketModule.WebSocketTimeoutException("timeout")
 
-        class WebSocketConnectionClosedException(Exception):
-            pass
+    fake_module = FakeWebsocketModule(create_fn=_timeout)
 
-        @staticmethod
-        def create_connection(_url, timeout):
-            raise TimeoutWebsocketModule.WebSocketTimeoutException("timeout")
-
-    monkeypatch.setattr(main, "_websocket", TimeoutWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
 
@@ -187,18 +181,12 @@ def test_send_image_websocket_closed_connection_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class ClosedWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
+    def _closed(_url, _timeout):
+        raise FakeWebsocketModule.WebSocketConnectionClosedException("closed")
 
-        class WebSocketConnectionClosedException(Exception):
-            pass
+    fake_module = FakeWebsocketModule(create_fn=_closed)
 
-        @staticmethod
-        def create_connection(_url, timeout):
-            raise ClosedWebsocketModule.WebSocketConnectionClosedException("closed")
-
-    monkeypatch.setattr(main, "_websocket", ClosedWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
 
