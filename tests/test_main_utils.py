@@ -312,8 +312,48 @@ def test_persistent_websocket_client_concurrent_sends(tmp_path):
 
     assert all(results)
     assert len(results) == 10
-    # Each send produces 1 text metadata + 1 binary frame -> exactly 20 frames total
     assert len(fake_ws.frames) == 20
     client.close()
+
+
+def test_persistent_websocket_client_proactive_age_refresh(monkeypatch, tmp_path):
+    image = tmp_path / "img.jpg"
+    image.write_bytes(b"content")
+
+    created_sockets = []
+
+    def _create(_url, timeout, **kwargs):
+        ws = FakeWS()
+        created_sockets.append(ws)
+        return ws
+
+    fake_module = FakeWebsocketModule(create_fn=_create)
+
+    client = main.PersistentWebSocketClient(
+        url="ws://localhost:9999/ws",
+        max_connection_age_s=10.0,
+        ws_module=fake_module,
+    )
+
+    current_time = 1000.0
+    monkeypatch.setattr(main.time, "monotonic", lambda: current_time)
+
+    # 1st send: creates socket 1
+    assert client.send(str(image)) is True
+    assert len(created_sockets) == 1
+
+    # 2nd send at +5s (age 5s < 10s): reuses socket 1
+    current_time = 1005.0
+    assert client.send(str(image)) is True
+    assert len(created_sockets) == 1
+
+    # 3rd send at +11s (age 11s >= 10s): proactively recycles socket 1 and creates socket 2
+    current_time = 1011.0
+    assert client.send(str(image)) is True
+    assert len(created_sockets) == 2
+    assert created_sockets[0].closed is True
+    assert created_sockets[1].closed is False
+    client.close()
+
 
 

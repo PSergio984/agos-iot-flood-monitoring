@@ -19,6 +19,7 @@ from config import (
     WS_SEND_METADATA_FIRST,
     WS_PING_INTERVAL,
     WS_PING_TIMEOUT,
+    WS_MAX_CONNECTION_AGE_S,
     CAMERA_SEND_PRECAPTURE_STATUS_IMAGE,
     USE_TEST_IMAGES,
     TEST_IMAGES_DIR,
@@ -50,6 +51,7 @@ try:
     WEBSOCKET_AVAILABLE = True
 except ImportError:
     WEBSOCKET_AVAILABLE = False
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -208,6 +210,7 @@ class PersistentWebSocketClient:
         send_metadata_first: bool = WS_SEND_METADATA_FIRST,
         ping_interval: int = WS_PING_INTERVAL,
         ping_timeout: int = WS_PING_TIMEOUT,
+        max_connection_age_s: float = WS_MAX_CONNECTION_AGE_S,
         ws_module = _websocket,
     ):
         self.url = url
@@ -215,8 +218,10 @@ class PersistentWebSocketClient:
         self.send_metadata_first = send_metadata_first
         self.ping_interval = ping_interval
         self.ping_timeout = ping_timeout
+        self.max_connection_age_s = max_connection_age_s
         self.ws_module = ws_module
         self._ws = None
+        self._connected_at = 0.0
         self._lock = threading.Lock()
 
     def _get_exceptions(self):
@@ -231,6 +236,7 @@ class PersistentWebSocketClient:
             except Exception:
                 pass
             self._ws = None
+        self._connected_at = 0.0
 
     def close(self):
         with self._lock:
@@ -242,9 +248,16 @@ class PersistentWebSocketClient:
             return None
 
         if self._ws is not None:
-            if getattr(self._ws, "connected", True):
+            now = time.monotonic()
+            if self.max_connection_age_s > 0 and (now - self._connected_at) >= self.max_connection_age_s:
+                logger.debug(
+                    f"[WS] Proactively refreshing connection before cloud timeout (age: {now - self._connected_at:.1f}s)"
+                )
+                self._close_locked()
+            elif getattr(self._ws, "connected", True):
                 return self._ws
-            self._close_locked()
+            else:
+                self._close_locked()
 
         ws_timeout_exc, ws_closed_exc = self._get_exceptions()
 
@@ -255,6 +268,7 @@ class PersistentWebSocketClient:
                 extra_kwargs["ping_interval"] = self.ping_interval
                 extra_kwargs["ping_timeout"] = self.ping_timeout
             self._ws = self.ws_module.create_connection(self.url, timeout=10, **extra_kwargs)
+            self._connected_at = time.monotonic()
             logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
             return self._ws
         except ws_timeout_exc:
@@ -267,6 +281,7 @@ class PersistentWebSocketClient:
             logger.error(f"[WS] Failed to connect: {e}")
 
         self._ws = None
+        self._connected_at = 0.0
         return None
 
     def get_connection(self):

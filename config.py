@@ -16,6 +16,7 @@ ENABLE_WEBSOCKET_SEND = os.getenv("ENABLE_WEBSOCKET_SEND", "true").lower() == "t
 WS_SEND_METADATA_FIRST = os.getenv("WS_SEND_METADATA_FIRST", "false").lower() == "true"
 WS_PING_INTERVAL = int((os.getenv("WS_PING_INTERVAL") or "20").strip() or "20")
 WS_PING_TIMEOUT = int((os.getenv("WS_PING_TIMEOUT") or "10").strip() or "10")
+WS_MAX_CONNECTION_AGE_S = float((os.getenv("WS_MAX_CONNECTION_AGE_S") or "50.0").strip() or "50.0")
 CAMERA_SEND_PRECAPTURE_STATUS_IMAGE = os.getenv("CAMERA_SEND_PRECAPTURE_STATUS_IMAGE", "false").lower() == "true"
 USE_TEST_IMAGES = os.getenv("USE_TEST_IMAGES", "false").lower() == "true"
 TEST_IMAGES_DIR = os.getenv("TEST_IMAGES_DIR", "test_images")
