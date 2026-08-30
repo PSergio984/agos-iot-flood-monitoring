@@ -196,29 +196,68 @@ def _send_precapture_status_image() -> None:
                 logger.warning(f"Failed to clean up {status_path}: {cleanup_err}")
 
 
-def send_image_websocket(image_path, cloudinary_url=None, extra_metadata=None):
-    """Send captured image to WebSocket server.
+class PersistentWebSocketClient:
+    """Maintains a persistent WebSocket connection to avoid repeated TLS handshakes."""
 
-    Protocol:
-      1. Text frame — JSON metadata (device ID, timestamp, file size, cloudinary URL).
-      2. Binary frame — raw JPEG bytes.
+    def __init__(self, url: str):
+        self.url = url
+        self._ws = None
+        self._lock = threading.Lock()
+        self._ws_module = _websocket
 
-    The server can use the metadata to associate the binary blob with the
-    correct device/reading before the binary frame arrives.
-    """
-    if not WEBSOCKET_AVAILABLE:
-        logger.warning("[WS] websocket-client not installed — skipping WebSocket send")
-        return False
-    if not WEBSOCKET_SERVER_URL:
-        logger.debug("[WS] WEBSOCKET_SERVER_URL not set — skipping WebSocket send")
-        return False
+    def get_connection(self):
+        if not WEBSOCKET_AVAILABLE or not self.url:
+            return None
 
-    try:
-        with open(image_path, "rb") as f:
-            image_data = f.read()
+        with self._lock:
+            if self._ws is not None:
+                connected = getattr(self._ws, "connected", True)
+                if connected:
+                    return self._ws
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
+                self._ws = None
 
-        ws = _websocket.create_connection(WEBSOCKET_SERVER_URL, timeout=10)
+            ws_timeout_exc = getattr(_websocket, "WebSocketTimeoutException", ()) if _websocket else ()
+            ws_closed_exc = getattr(_websocket, "WebSocketConnectionClosedException", ()) if _websocket else ()
+
+            try:
+                logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
+                self._ws = _websocket.create_connection(self.url, timeout=10)
+                logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
+                return self._ws
+            except ws_timeout_exc:
+                logger.error(f"[WS] Connection timed out: {_safe_ws_url(self.url)}")
+            except ws_closed_exc as e:
+                logger.error(f"[WS] Connection closed unexpectedly during connect: {e}")
+            except OSError as e:
+                logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
+            except Exception as e:
+                logger.error(f"[WS] Failed to connect: {e}")
+            self._ws = None
+            return None
+
+    def send(self, image_path, cloudinary_url=None, extra_metadata=None):
+        if not WEBSOCKET_AVAILABLE:
+            logger.warning("[WS] websocket-client not installed — skipping WebSocket send")
+            return False
+        if not self.url:
+            logger.debug("[WS] WEBSOCKET_SERVER_URL not set — skipping WebSocket send")
+            return False
+
+        ws_timeout_exc = getattr(_websocket, "WebSocketTimeoutException", ()) if _websocket else ()
+        ws_closed_exc = getattr(_websocket, "WebSocketConnectionClosedException", ()) if _websocket else ()
+
         try:
+            with open(image_path, "rb") as f:
+                image_data = f.read()
+
+            ws = self.get_connection()
+            if ws is None:
+                return False
+
             metadata = {
                 "type": "image",
                 "sensor_device_id": SENSOR_DEVICE_ID,
@@ -230,28 +269,66 @@ def send_image_websocket(image_path, cloudinary_url=None, extra_metadata=None):
             if extra_metadata:
                 metadata.update(extra_metadata)
             if WS_SEND_METADATA_FIRST:
-                # Optional frame 1: metadata as JSON text.
                 ws.send(json.dumps(metadata))
-            # Raw image bytes frame.
             ws.send_binary(image_data)
-        finally:
-            ws.close()
 
-        logger.info(
-            f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(WEBSOCKET_SERVER_URL)} "
-            f"(metadata_first={WS_SEND_METADATA_FIRST})"
-        )
-        return True
+            logger.info(
+                f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(self.url)} "
+                f"(metadata_first={WS_SEND_METADATA_FIRST})"
+            )
+            return True
+        except ws_timeout_exc:
+            logger.error(f"[WS] Send timed out, resetting connection: {_safe_ws_url(self.url)}")
+            self.close()
+        except ws_closed_exc as e:
+            logger.error(f"[WS] Connection closed during send: {e}")
+            self.close()
+        except OSError as e:
+            logger.error(f"[WS] Network error during send: {e}")
+            self.close()
+        except Exception as e:
+            logger.error(f"[WS] Failed to send image: {e}")
+            self.close()
+        return False
 
-    except _websocket.WebSocketTimeoutException:
-        logger.error(f"[WS] Connection timed out: {_safe_ws_url(WEBSOCKET_SERVER_URL)}")
-    except _websocket.WebSocketConnectionClosedException as e:
-        logger.error(f"[WS] Connection closed unexpectedly: {e}")
-    except OSError as e:
-        logger.error(f"[WS] Network error: {e}")
-    except Exception as e:
-        logger.error(f"[WS] Failed to send image: {e}")
-    return False
+    def close(self):
+        with self._lock:
+            if self._ws is not None:
+                try:
+                    self._ws.close()
+                except Exception:
+                    pass
+                self._ws = None
+
+
+_ws_client: PersistentWebSocketClient | None = None
+
+
+def get_ws_client() -> PersistentWebSocketClient:
+    global _ws_client
+    if (
+        _ws_client is None
+        or _ws_client.url != WEBSOCKET_SERVER_URL
+        or _ws_client._ws_module is not _websocket
+    ):
+        if _ws_client is not None:
+            _ws_client.close()
+        _ws_client = PersistentWebSocketClient(WEBSOCKET_SERVER_URL)
+    return _ws_client
+
+
+def send_image_websocket(image_path, cloudinary_url=None, extra_metadata=None):
+    """Send captured image to WebSocket server using a persistent connection.
+
+    Protocol:
+      1. Text frame — JSON metadata (device ID, timestamp, file size, cloudinary URL).
+      2. Binary frame — raw JPEG bytes.
+
+    The server can use the metadata to associate the binary blob with the
+    correct device/reading before the binary frame arrives.
+    """
+    client = get_ws_client()
+    return client.send(image_path, cloudinary_url=cloudinary_url, extra_metadata=extra_metadata)
 
 stop_event = threading.Event()
 
@@ -272,6 +349,8 @@ water_level_filter = WaterLevelFilter(
 def signal_handler(sig, frame):
     logger.info("Shutdown requested")
     stop_event.set()
+    if _ws_client is not None:
+        _ws_client.close()
 
 
 def sensor_loop():
@@ -571,4 +650,6 @@ if __name__ == "__main__":
     sensor_thread.join()
     camera_thread.join()
     risk_led_thread.join()
+    if _ws_client is not None:
+        _ws_client.close()
     logger.info("AGOS stopped.")

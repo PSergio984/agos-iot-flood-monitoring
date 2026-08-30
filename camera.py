@@ -15,13 +15,13 @@ from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR
 
 CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
 CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
-CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "false").lower() == "true"
+CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "true").lower() == "true"
 CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
 CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
 CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() == "true"
 
 # ── Image quality settings ───────────────────────────────────────────────────
-CAMERA_JPEG_QUALITY      = int(os.getenv("CAMERA_JPEG_QUALITY", "95"))
+CAMERA_JPEG_QUALITY      = int(os.getenv("CAMERA_JPEG_QUALITY", "80"))
 CAMERA_TUNING_FILE_DAY   = os.getenv("CAMERA_TUNING_FILE_DAY", os.getenv("CAMERA_TUNING_FILE", "")).strip()
 CAMERA_TUNING_FILE_NIGHT = os.getenv("CAMERA_TUNING_FILE_NIGHT", os.getenv("CAMERA_TUNING_FILE", "")).strip()
 CAMERA_SHARPNESS         = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
