@@ -409,29 +409,31 @@ def test_evaluate_and_gate_frame(monkeypatch, tmp_path):
     img = tmp_path / "frame.jpg"
     img.write_bytes(b"data")
 
-    # Case 1: Normal usable frame
+    # Case 1: Normal usable frame in daytime with quality checks enabled
+    monkeypatch.setattr(main, "is_twilight_hours", lambda: False)
+    monkeypatch.setattr(main, "FRAME_QUALITY_CHECK_ENABLED", True)
     monkeypatch.setattr(main, "get_frame_quality_metrics", lambda p: {"brightness": 100.0, "contrast_stddev": 40.0, "laplacian_var": 200.0})
     monkeypatch.setattr(main, "is_frame_dark", lambda m: False)
     monkeypatch.setattr(main, "is_frame_obscured", lambda m: False)
     monkeypatch.setattr(main, "is_frame_usable", lambda p: True)
 
-    night_vision_triggered = False
-    monkeypatch.setattr(main, "force_night_vision", lambda: nonlocal_trigger())
-    def nonlocal_trigger():
-        nonlocal night_vision_triggered
-        night_vision_triggered = True
-
     assert main._evaluate_and_gate_frame(str(img), context_label="test") is True
-    assert night_vision_triggered is False
 
-    # Case 2: Dark frame triggers night vision and passes gate if usable
+    # Case 2: Daytime with quality check disabled -> 100% bypass without calling OpenCV metrics
+    monkeypatch.setattr(main, "FRAME_QUALITY_CHECK_ENABLED", False)
+    monkeypatch.setattr(main, "get_frame_quality_metrics", lambda p: (_ for _ in ()).throw(AssertionError("should not call OpenCV in daytime")))
+    assert main._evaluate_and_gate_frame(str(img), context_label="test") is True
+
+    # Case 3: Twilight active and scene is dark -> drops frame
+    monkeypatch.setattr(main, "is_twilight_hours", lambda: True)
+    monkeypatch.setattr(main, "get_frame_quality_metrics", lambda p: {"brightness": 5.0, "contrast_stddev": 2.0, "laplacian_var": 10.0})
     monkeypatch.setattr(main, "is_frame_dark", lambda m: True)
-    assert main._evaluate_and_gate_frame(str(img)) is True
-    assert night_vision_triggered is True
+    assert main._evaluate_and_gate_frame(str(img), context_label="twilight") is False
 
-    # Case 3: Unusable frame is dropped
-    monkeypatch.setattr(main, "is_frame_usable", lambda p: False)
-    assert main._evaluate_and_gate_frame(str(img), context_label="test") is False
+    # Case 4: Twilight active and scene still has usable light -> passes frame
+    monkeypatch.setattr(main, "is_frame_dark", lambda m: False)
+    assert main._evaluate_and_gate_frame(str(img), context_label="twilight") is True
+
 
 
 def test_persistent_websocket_heartbeat_worker(tmp_path):

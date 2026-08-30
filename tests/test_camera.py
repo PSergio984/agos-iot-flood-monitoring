@@ -210,3 +210,43 @@ def test_apply_software_crop_bypasses_on_hardware(monkeypatch):
     camera._apply_software_crop("some_path.jpg")
 
 
+def test_is_night_sleep_hours(monkeypatch):
+    monkeypatch.setattr(camera, "CAMERA_NIGHT_SLEEP_ENABLED", True)
+    monkeypatch.setattr(camera, "CAMERA_NIGHT_SLEEP_START_HOUR", 19)
+    monkeypatch.setattr(camera, "CAMERA_NIGHT_SLEEP_END_HOUR", 6)
+
+    # 14:00 -> Daytime
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 1, 14, 0, 0)) is False
+    # 18:30 -> Twilight (not yet full night sleep)
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 1, 18, 30, 0)) is False
+    # 19:00 -> Full night sleep starts
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 1, 19, 0, 0)) is True
+    # 23:30 -> Midnight crossing
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 1, 23, 30, 0)) is True
+    # 02:00 -> Early morning before wake
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 2, 2, 0, 0)) is True
+    # 06:00 -> Wake up
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 2, 6, 0, 0)) is False
+    # 08:00 -> Daytime
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 2, 8, 0, 0)) is False
+
+    # Disabled toggle
+    monkeypatch.setattr(camera, "CAMERA_NIGHT_SLEEP_ENABLED", False)
+    assert camera.is_night_sleep_hours(dt.datetime(2025, 1, 1, 23, 0, 0)) is False
+
+
+def test_is_twilight_hours(monkeypatch):
+    monkeypatch.setattr(camera, "CAMERA_TWILIGHT_START_HOUR", 18)
+    monkeypatch.setattr(camera, "CAMERA_NIGHT_SLEEP_START_HOUR", 19)
+
+    # 17:59 -> Not twilight
+    assert camera.is_twilight_hours(dt.datetime(2025, 1, 1, 17, 59, 0)) is False
+    # 18:00 -> Twilight begins
+    assert camera.is_twilight_hours(dt.datetime(2025, 1, 1, 18, 0, 0)) is True
+    # 18:45 -> Twilight active
+    assert camera.is_twilight_hours(dt.datetime(2025, 1, 1, 18, 45, 0)) is True
+    # 19:00 -> Twilight ends (full night sleep begins)
+    assert camera.is_twilight_hours(dt.datetime(2025, 1, 1, 19, 0, 0)) is False
+
+
+

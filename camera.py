@@ -11,7 +11,15 @@ try:
 except Exception:
     ZoneInfo = None
 
-from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR, get_env_var
+from config import (
+    TRAINING_CAPTURES_DIR,
+    TRAINING_RAINING_DIR,
+    CAMERA_NIGHT_SLEEP_ENABLED,
+    CAMERA_TWILIGHT_START_HOUR,
+    CAMERA_NIGHT_SLEEP_START_HOUR,
+    CAMERA_NIGHT_SLEEP_END_HOUR,
+    get_env_var,
+)
 
 CAMERA_WIDTH         = get_env_var("CAMERA_WIDTH", "1296", int)
 CAMERA_HEIGHT        = get_env_var("CAMERA_HEIGHT", "972", int)
@@ -186,6 +194,37 @@ def _is_daytime(now: datetime.datetime | None = None) -> bool:
 
     # Same start hour means "always day" in auto mode.
     return True
+
+
+def is_night_sleep_hours(now: datetime.datetime | None = None) -> bool:
+    """Return True if night sleep mode is enabled and current time falls in the night sleep window (e.g. 19:00 - 06:00)."""
+    if not CAMERA_NIGHT_SLEEP_ENABLED:
+        return False
+    dt = _ir_now(now)
+    hour = dt.hour
+    start_hour = _sanitize_hour(CAMERA_NIGHT_SLEEP_START_HOUR, 19)
+    end_hour = _sanitize_hour(CAMERA_NIGHT_SLEEP_END_HOUR, 6)
+
+    # Midnight-crossing night window (e.g. 19:00 to 06:00)
+    if start_hour > end_hour:
+        return hour >= start_hour or hour < end_hour
+    elif start_hour < end_hour:
+        return start_hour <= hour < end_hour
+    return False
+
+
+def is_twilight_hours(now: datetime.datetime | None = None) -> bool:
+    """Return True if current time falls in the twilight sensing window (e.g. 18:00 - 19:00)."""
+    dt = _ir_now(now)
+    hour = dt.hour
+    twilight_start = _sanitize_hour(CAMERA_TWILIGHT_START_HOUR, 18)
+    night_start = _sanitize_hour(CAMERA_NIGHT_SLEEP_START_HOUR, 19)
+
+    if twilight_start < night_start:
+        return twilight_start <= hour < night_start
+    elif twilight_start > night_start:
+        return hour >= twilight_start or hour < night_start
+    return False
 
 
 class IRCutController:

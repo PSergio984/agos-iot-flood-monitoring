@@ -38,10 +38,18 @@ from config import (
     SENSOR_FILTER_ZERO_MAD_TOLERANCE_CM,
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
+    FRAME_QUALITY_CHECK_ENABLED,
     RISK_SCORE_API_URL,
     RISK_SCORE_POLL_INTERVAL,
 )
-from camera import PersistentCamera, build_ir_status_image, get_ir_status_snapshot, force_night_vision
+from camera import (
+    PersistentCamera,
+    build_ir_status_image,
+    get_ir_status_snapshot,
+    force_night_vision,
+    is_night_sleep_hours,
+    is_twilight_hours,
+)
 from frame_quality import get_frame_quality_metrics, is_frame_usable, is_frame_dark, is_frame_obscured
 from sensor import get_water_level, update_risk_led, water_level_to_risk_score
 from uploader import upload_image
@@ -608,7 +616,21 @@ def _evaluate_and_gate_frame(path: str, context_label: str = "") -> bool:
 
     Returns True if frame is usable and should be sent/uploaded, False if dropped.
     """
+    in_twilight = is_twilight_hours()
+
+    # During normal daylight and when quality checks are disabled, bypass OpenCV completely (0% CPU)
+    if not in_twilight and not FRAME_QUALITY_CHECK_ENABLED:
+        return True
+
     metrics = get_frame_quality_metrics(path)
+    if in_twilight and metrics and is_frame_dark(metrics):
+        tag = f" [{context_label}]" if context_label else ""
+        logger.info(
+            f"[CAMERA] Darkness detected during twilight transition{tag} "
+            f"(brightness={metrics['brightness']:.1f}) — skipping frame"
+        )
+        return False
+
     if metrics and (is_frame_dark(metrics) or is_frame_obscured(metrics)):
         force_night_vision()
         logger.info(
@@ -617,7 +639,7 @@ def _evaluate_and_gate_frame(path: str, context_label: str = "") -> bool:
             f"laplacian={metrics['laplacian_var']:.1f})"
         )
 
-    if not is_frame_usable(path):
+    if FRAME_QUALITY_CHECK_ENABLED and not is_frame_usable(path):
         tag = f" [{context_label}]" if context_label else ""
         logger.warning(
             f"[CAMERA] Dropped frame {path}{tag} (quality gate): "
@@ -648,6 +670,11 @@ def camera_loop():
             logger.info(f"[CAMERA]   {label}: {count} image(s) from '{directory}/'")
 
         while not stop_event.is_set():
+            if is_night_sleep_hours():
+                logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused (60s deep sleep)")
+                stop_event.wait(60.0)
+                continue
+
             t0 = time.monotonic()
             path = None
             try:
@@ -687,6 +714,11 @@ def camera_loop():
     else:
         with PersistentCamera() as cam:
             while not stop_event.is_set():
+                if is_night_sleep_hours():
+                    logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused (60s deep sleep)")
+                    stop_event.wait(60.0)
+                    continue
+
                 t0 = time.monotonic()
                 path = None
                 try:
