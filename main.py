@@ -199,14 +199,39 @@ def _send_precapture_status_image() -> None:
 class PersistentWebSocketClient:
     """Maintains a persistent WebSocket connection to avoid repeated TLS handshakes."""
 
-    def __init__(self, url: str):
+    def __init__(
+        self,
+        url: str,
+        sensor_device_id: int = SENSOR_DEVICE_ID,
+        send_metadata_first: bool = WS_SEND_METADATA_FIRST,
+        ws_module = _websocket,
+    ):
         self.url = url
+        self.sensor_device_id = sensor_device_id
+        self.send_metadata_first = send_metadata_first
+        self.ws_module = ws_module
         self._ws = None
         self._lock = threading.Lock()
-        self._ws_module = _websocket
+
+    def _get_exceptions(self):
+        timeout_exc = getattr(self.ws_module, "WebSocketTimeoutException", ()) if self.ws_module else ()
+        closed_exc = getattr(self.ws_module, "WebSocketConnectionClosedException", ()) if self.ws_module else ()
+        return timeout_exc, closed_exc
+
+    def _close_locked(self):
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+    def close(self):
+        with self._lock:
+            self._close_locked()
 
     def get_connection(self):
-        if not WEBSOCKET_AVAILABLE or not self.url:
+        if not WEBSOCKET_AVAILABLE or not self.url or not self.ws_module:
             return None
 
         with self._lock:
@@ -214,18 +239,13 @@ class PersistentWebSocketClient:
                 connected = getattr(self._ws, "connected", True)
                 if connected:
                     return self._ws
-                try:
-                    self._ws.close()
-                except Exception:
-                    pass
-                self._ws = None
+                self._close_locked()
 
-            ws_timeout_exc = getattr(_websocket, "WebSocketTimeoutException", ()) if _websocket else ()
-            ws_closed_exc = getattr(_websocket, "WebSocketConnectionClosedException", ()) if _websocket else ()
+            ws_timeout_exc, ws_closed_exc = self._get_exceptions()
 
             try:
                 logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
-                self._ws = _websocket.create_connection(self.url, timeout=10)
+                self._ws = self.ws_module.create_connection(self.url, timeout=10)
                 logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
                 return self._ws
             except ws_timeout_exc:
@@ -236,6 +256,7 @@ class PersistentWebSocketClient:
                 logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
             except Exception as e:
                 logger.error(f"[WS] Failed to connect: {e}")
+
             self._ws = None
             return None
 
@@ -247,20 +268,43 @@ class PersistentWebSocketClient:
             logger.debug("[WS] WEBSOCKET_SERVER_URL not set — skipping WebSocket send")
             return False
 
-        ws_timeout_exc = getattr(_websocket, "WebSocketTimeoutException", ()) if _websocket else ()
-        ws_closed_exc = getattr(_websocket, "WebSocketConnectionClosedException", ()) if _websocket else ()
-
         try:
             with open(image_path, "rb") as f:
                 image_data = f.read()
+        except OSError as e:
+            logger.error(f"[WS] Failed to read image file {image_path}: {e}")
+            return False
 
-            ws = self.get_connection()
+        ws_timeout_exc, ws_closed_exc = self._get_exceptions()
+
+        with self._lock:
+            # Recheck/fetch connection within lock for safe thread synchronization
+            if self._ws is None or not getattr(self._ws, "connected", True):
+                self._close_locked()
+                try:
+                    logger.info(f"[WS] Connecting to {_safe_ws_url(self.url)}...")
+                    self._ws = self.ws_module.create_connection(self.url, timeout=10)
+                    logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
+                except ws_timeout_exc:
+                    logger.error(f"[WS] Connection timed out: {_safe_ws_url(self.url)}")
+                    return False
+                except ws_closed_exc as e:
+                    logger.error(f"[WS] Connection closed unexpectedly during connect: {e}")
+                    return False
+                except OSError as e:
+                    logger.error(f"[WS] Network error connecting to {_safe_ws_url(self.url)}: {e}")
+                    return False
+                except Exception as e:
+                    logger.error(f"[WS] Failed to connect: {e}")
+                    return False
+
+            ws = self._ws
             if ws is None:
                 return False
 
             metadata = {
                 "type": "image",
-                "sensor_device_id": SENSOR_DEVICE_ID,
+                "sensor_device_id": self.sensor_device_id,
                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "filename": os.path.basename(image_path),
                 "size": len(image_data),
@@ -268,37 +312,31 @@ class PersistentWebSocketClient:
             }
             if extra_metadata:
                 metadata.update(extra_metadata)
-            if WS_SEND_METADATA_FIRST:
-                ws.send(json.dumps(metadata))
-            ws.send_binary(image_data)
 
-            logger.info(
-                f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(self.url)} "
-                f"(metadata_first={WS_SEND_METADATA_FIRST})"
-            )
-            return True
-        except ws_timeout_exc:
-            logger.error(f"[WS] Send timed out, resetting connection: {_safe_ws_url(self.url)}")
-            self.close()
-        except ws_closed_exc as e:
-            logger.error(f"[WS] Connection closed during send: {e}")
-            self.close()
-        except OSError as e:
-            logger.error(f"[WS] Network error during send: {e}")
-            self.close()
-        except Exception as e:
-            logger.error(f"[WS] Failed to send image: {e}")
-            self.close()
+            try:
+                if self.send_metadata_first:
+                    ws.send(json.dumps(metadata))
+                ws.send_binary(image_data)
+
+                logger.info(
+                    f"[WS] Sent image ({len(image_data):,} bytes) to {_safe_ws_url(self.url)} "
+                    f"(metadata_first={self.send_metadata_first})"
+                )
+                return True
+            except ws_timeout_exc:
+                logger.error(f"[WS] Send timed out, resetting connection: {_safe_ws_url(self.url)}")
+                self._close_locked()
+            except ws_closed_exc as e:
+                logger.error(f"[WS] Connection closed during send: {e}")
+                self._close_locked()
+            except OSError as e:
+                logger.error(f"[WS] Network error during send: {e}")
+                self._close_locked()
+            except Exception as e:
+                logger.error(f"[WS] Failed to send image: {e}")
+                self._close_locked()
+
         return False
-
-    def close(self):
-        with self._lock:
-            if self._ws is not None:
-                try:
-                    self._ws.close()
-                except Exception:
-                    pass
-                self._ws = None
 
 
 _ws_client: PersistentWebSocketClient | None = None
@@ -309,11 +347,18 @@ def get_ws_client() -> PersistentWebSocketClient:
     if (
         _ws_client is None
         or _ws_client.url != WEBSOCKET_SERVER_URL
-        or _ws_client._ws_module is not _websocket
+        or _ws_client.sensor_device_id != SENSOR_DEVICE_ID
+        or _ws_client.send_metadata_first != WS_SEND_METADATA_FIRST
+        or _ws_client.ws_module is not _websocket
     ):
         if _ws_client is not None:
             _ws_client.close()
-        _ws_client = PersistentWebSocketClient(WEBSOCKET_SERVER_URL)
+        _ws_client = PersistentWebSocketClient(
+            url=WEBSOCKET_SERVER_URL,
+            sensor_device_id=SENSOR_DEVICE_ID,
+            send_metadata_first=WS_SEND_METADATA_FIRST,
+            ws_module=_websocket,
+        )
     return _ws_client
 
 

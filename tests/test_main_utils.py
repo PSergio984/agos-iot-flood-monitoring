@@ -5,6 +5,46 @@ from types import SimpleNamespace
 import main
 
 
+class FakeWS:
+    def __init__(self, should_fail=False):
+        self.frames = []
+        self.closed = False
+        self.connected = True
+        self.should_fail = should_fail
+
+    def send(self, payload):
+        if self.should_fail:
+            raise OSError("broken pipe")
+        self.frames.append(("text", payload))
+
+    def send_binary(self, payload):
+        if self.should_fail:
+            raise OSError("broken pipe")
+        self.frames.append(("binary", payload))
+
+    def close(self):
+        self.closed = True
+        self.connected = False
+
+
+class FakeWebsocketModule:
+    class WebSocketTimeoutException(Exception):
+        pass
+
+    class WebSocketConnectionClosedException(Exception):
+        pass
+
+    def __init__(self, fake_ws=None, create_fn=None):
+        self.fake_ws = fake_ws or FakeWS()
+        self.create_fn = create_fn
+
+    def create_connection(self, _url, timeout):
+        if self.create_fn:
+            return self.create_fn(_url, timeout)
+        assert timeout == 10
+        return self.fake_ws
+
+
 def test_safe_ws_url_strips_sensitive_parts():
     url = "wss://user:pass@example.com:9000/ws/path?a=1#frag"
     assert main._safe_ws_url(url) == "wss://example.com:9000"
@@ -38,37 +78,10 @@ def test_send_image_websocket_success(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class FakeWS:
-        def __init__(self):
-            self.frames = []
-            self.closed = False
-            self.connected = True
-
-        def send(self, payload):
-            self.frames.append(("text", payload))
-
-        def send_binary(self, payload):
-            self.frames.append(("binary", payload))
-
-        def close(self):
-            self.closed = True
-            self.connected = False
-
     fake_ws = FakeWS()
+    fake_module = FakeWebsocketModule(fake_ws)
 
-    class FakeWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
-
-        class WebSocketConnectionClosedException(Exception):
-            pass
-
-        @staticmethod
-        def create_connection(_url, timeout):
-            assert timeout == 10
-            return fake_ws
-
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", True)
@@ -104,37 +117,10 @@ def test_send_image_websocket_binary_only_mode(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class FakeWS:
-        def __init__(self):
-            self.frames = []
-            self.closed = False
-            self.connected = True
-
-        def send(self, payload):
-            self.frames.append(("text", payload))
-
-        def send_binary(self, payload):
-            self.frames.append(("binary", payload))
-
-        def close(self):
-            self.closed = True
-            self.connected = False
-
     fake_ws = FakeWS()
+    fake_module = FakeWebsocketModule(fake_ws)
 
-    class FakeWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
-
-        class WebSocketConnectionClosedException(Exception):
-            pass
-
-        @staticmethod
-        def create_connection(_url, timeout):
-            assert timeout == 10
-            return fake_ws
-
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
@@ -152,39 +138,17 @@ def test_send_image_websocket_reuses_connection(monkeypatch, tmp_path):
     image2 = tmp_path / "img2.jpg"
     image2.write_bytes(b"frame-2")
 
-    class FakeWS:
-        def __init__(self):
-            self.frames = []
-            self.closed = False
-            self.connected = True
-
-        def send(self, payload):
-            self.frames.append(("text", payload))
-
-        def send_binary(self, payload):
-            self.frames.append(("binary", payload))
-
-        def close(self):
-            self.closed = True
-            self.connected = False
-
     connect_count = 0
     fake_ws = FakeWS()
 
-    class FakeWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
+    def _create(_url, timeout):
+        nonlocal connect_count
+        connect_count += 1
+        return fake_ws
 
-        class WebSocketConnectionClosedException(Exception):
-            pass
+    fake_module = FakeWebsocketModule(fake_ws, create_fn=_create)
 
-        @staticmethod
-        def create_connection(_url, timeout):
-            nonlocal connect_count
-            connect_count += 1
-            return fake_ws
-
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
@@ -201,7 +165,7 @@ def test_send_image_websocket_timeout_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class FakeWebsocketModule:
+    class TimeoutWebsocketModule:
         class WebSocketTimeoutException(Exception):
             pass
 
@@ -210,9 +174,9 @@ def test_send_image_websocket_timeout_path(monkeypatch, tmp_path):
 
         @staticmethod
         def create_connection(_url, timeout):
-            raise FakeWebsocketModule.WebSocketTimeoutException("timeout")
+            raise TimeoutWebsocketModule.WebSocketTimeoutException("timeout")
 
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", TimeoutWebsocketModule)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
 
@@ -223,7 +187,7 @@ def test_send_image_websocket_closed_connection_path(monkeypatch, tmp_path):
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class FakeWebsocketModule:
+    class ClosedWebsocketModule:
         class WebSocketTimeoutException(Exception):
             pass
 
@@ -232,9 +196,9 @@ def test_send_image_websocket_closed_connection_path(monkeypatch, tmp_path):
 
         @staticmethod
         def create_connection(_url, timeout):
-            raise FakeWebsocketModule.WebSocketConnectionClosedException("closed")
+            raise ClosedWebsocketModule.WebSocketConnectionClosedException("closed")
 
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", ClosedWebsocketModule)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
 
@@ -266,41 +230,14 @@ def test_send_image_websocket_reconnects_after_send_error(monkeypatch, tmp_path)
     image = tmp_path / "img.jpg"
     image.write_bytes(b"jpeg-bytes")
 
-    class FakeWS:
-        def __init__(self, should_fail=False):
-            self.should_fail = should_fail
-            self.frames = []
-            self.closed = False
-            self.connected = True
-
-        def send(self, payload):
-            if self.should_fail:
-                raise OSError("broken pipe")
-            self.frames.append(("text", payload))
-
-        def send_binary(self, payload):
-            if self.should_fail:
-                raise OSError("broken pipe")
-            self.frames.append(("binary", payload))
-
-        def close(self):
-            self.closed = True
-            self.connected = False
-
     socket_instances = [FakeWS(should_fail=True), FakeWS(should_fail=False)]
 
-    class FakeWebsocketModule:
-        class WebSocketTimeoutException(Exception):
-            pass
+    def _create(_url, timeout):
+        return socket_instances.pop(0)
 
-        class WebSocketConnectionClosedException(Exception):
-            pass
+    fake_module = FakeWebsocketModule(create_fn=_create)
 
-        @staticmethod
-        def create_connection(_url, timeout):
-            return socket_instances.pop(0)
-
-    monkeypatch.setattr(main, "_websocket", FakeWebsocketModule)
+    monkeypatch.setattr(main, "_websocket", fake_module)
     monkeypatch.setattr(main, "WEBSOCKET_AVAILABLE", True)
     monkeypatch.setattr(main, "WEBSOCKET_SERVER_URL", "ws://localhost:9000/ws")
     monkeypatch.setattr(main, "WS_SEND_METADATA_FIRST", False)
@@ -311,4 +248,63 @@ def test_send_image_websocket_reconnects_after_send_error(monkeypatch, tmp_path)
     # Second send auto-reconnects with new socket and succeeds
     assert main.send_image_websocket(str(image)) is True
     main.get_ws_client().close()
+
+
+def test_persistent_websocket_client_custom_parameters(tmp_path):
+    image = tmp_path / "img.jpg"
+    image.write_bytes(b"custom-bytes")
+
+    fake_ws = FakeWS()
+    fake_module = FakeWebsocketModule(fake_ws)
+
+    client = main.PersistentWebSocketClient(
+        url="ws://localhost:9999/ws",
+        sensor_device_id=42,
+        send_metadata_first=True,
+        ws_module=fake_module,
+    )
+
+    assert client.send(str(image)) is True
+    assert len(fake_ws.frames) == 2
+    metadata = json.loads(fake_ws.frames[0][1])
+    assert metadata["sensor_device_id"] == 42
+    client.close()
+
+
+def test_persistent_websocket_client_concurrent_sends(tmp_path):
+    import threading
+
+    fake_ws = FakeWS()
+    fake_module = FakeWebsocketModule(fake_ws)
+
+    client = main.PersistentWebSocketClient(
+        url="ws://localhost:9999/ws",
+        sensor_device_id=1,
+        send_metadata_first=True,
+        ws_module=fake_module,
+    )
+
+    threads = []
+    results = []
+
+    def _worker(idx):
+        img_path = tmp_path / f"img_{idx}.jpg"
+        img_path.write_bytes(f"content-{idx}".encode())
+        res = client.send(str(img_path))
+        results.append(res)
+
+    for i in range(10):
+        t = threading.Thread(target=_worker, args=(i,))
+        threads.append(t)
+        t.start()
+
+    for t in threads:
+        t.join()
+
+    assert all(results)
+    assert len(results) == 10
+    # Each send produces 1 text metadata + 1 binary frame -> exactly 20 frames total
+    assert len(fake_ws.frames) == 20
+    client.close()
+
 
