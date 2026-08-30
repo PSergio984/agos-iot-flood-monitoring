@@ -149,3 +149,25 @@ def test_ir_cut_controller_uses_consistent_datetime_awareness(monkeypatch):
 
     later = dt.datetime(2025, 1, 1, 0, 0, 31, tzinfo=dt.timezone.utc)
     assert ctrl.should_apply(False, now=later) is True
+
+
+def test_camera_gain_environment_parsing(monkeypatch):
+    import importlib
+
+    # Test American spelling
+    monkeypatch.setenv("CAMERA_ANALOG_GAIN", "3.5")
+    monkeypatch.delenv("CAMERA_ANALOGUE_GAIN", raising=False)
+    importlib.reload(camera)
+    assert camera.CAMERA_ANALOGUE_GAIN == 3.5
+
+    # Test British spelling overrides
+    monkeypatch.setenv("CAMERA_ANALOGUE_GAIN", "4.0")
+    importlib.reload(camera)
+    assert camera.CAMERA_ANALOGUE_GAIN == 4.0
+
+    # Test empty string fallback to default 0.0
+    monkeypatch.setenv("CAMERA_ANALOGUE_GAIN", "   ")
+    monkeypatch.delenv("CAMERA_ANALOG_GAIN", raising=False)
+    importlib.reload(camera)
+    assert camera.CAMERA_ANALOGUE_GAIN == 0.0
+

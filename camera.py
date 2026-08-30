@@ -13,25 +13,25 @@ except Exception:
 
 from config import TRAINING_CAPTURES_DIR, TRAINING_RAINING_DIR
 
-CAMERA_WIDTH         = int(os.getenv("CAMERA_WIDTH",         "1296"))
-CAMERA_HEIGHT        = int(os.getenv("CAMERA_HEIGHT",        "972"))
-CAMERA_NO_CROP       = os.getenv("CAMERA_NO_CROP",           "true").lower() == "true"
-CAMERA_SENSOR_WIDTH  = int(os.getenv("CAMERA_SENSOR_WIDTH",  "2592"))
-CAMERA_SENSOR_HEIGHT = int(os.getenv("CAMERA_SENSOR_HEIGHT", "1944"))
-CAMERA_LOG_SCALERCROP = os.getenv("CAMERA_LOG_SCALERCROP",   "false").lower() == "true"
+CAMERA_WIDTH         = int((os.getenv("CAMERA_WIDTH") or "1296").strip() or "1296")
+CAMERA_HEIGHT        = int((os.getenv("CAMERA_HEIGHT") or "972").strip() or "972")
+CAMERA_NO_CROP       = (os.getenv("CAMERA_NO_CROP") or "true").strip().lower() == "true"
+CAMERA_SENSOR_WIDTH  = int((os.getenv("CAMERA_SENSOR_WIDTH") or "2592").strip() or "2592")
+CAMERA_SENSOR_HEIGHT = int((os.getenv("CAMERA_SENSOR_HEIGHT") or "1944").strip() or "1944")
+CAMERA_LOG_SCALERCROP = (os.getenv("CAMERA_LOG_SCALERCROP") or "false").strip().lower() == "true"
 
 # ── Image quality settings ───────────────────────────────────────────────────
-CAMERA_JPEG_QUALITY      = int(os.getenv("CAMERA_JPEG_QUALITY", "80"))
-CAMERA_TUNING_FILE_DAY   = os.getenv("CAMERA_TUNING_FILE_DAY", os.getenv("CAMERA_TUNING_FILE", "")).strip()
-CAMERA_TUNING_FILE_NIGHT = os.getenv("CAMERA_TUNING_FILE_NIGHT", os.getenv("CAMERA_TUNING_FILE", "")).strip()
-CAMERA_SHARPNESS         = float(os.getenv("CAMERA_SHARPNESS", "1.0"))
-CAMERA_CONTRAST          = float(os.getenv("CAMERA_CONTRAST", "1.0"))
-CAMERA_SATURATION        = float(os.getenv("CAMERA_SATURATION", "1.0"))
-CAMERA_EXPOSURE_TIME     = int(os.getenv("CAMERA_EXPOSURE_TIME", "0"))    # µs; 0 = auto
-CAMERA_ANALOGUE_GAIN     = float(os.getenv("CAMERA_ANALOGUE_GAIN", os.getenv("CAMERA_ANALOG_GAIN", "0")))  # 0 = auto
-CAMERA_FRAME_DURATION_MAX = int(os.getenv("CAMERA_FRAME_DURATION_MAX", "500000"))  # µs
-CAMERA_EXPOSURE_VALUE_DAY   = float(os.getenv("CAMERA_EXPOSURE_VALUE_DAY", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
-CAMERA_EXPOSURE_VALUE_NIGHT = float(os.getenv("CAMERA_EXPOSURE_VALUE_NIGHT", os.getenv("CAMERA_EXPOSURE_VALUE", "0.0")))
+CAMERA_JPEG_QUALITY      = int((os.getenv("CAMERA_JPEG_QUALITY") or "80").strip() or "80")
+CAMERA_TUNING_FILE_DAY   = (os.getenv("CAMERA_TUNING_FILE_DAY") or os.getenv("CAMERA_TUNING_FILE") or "").strip()
+CAMERA_TUNING_FILE_NIGHT = (os.getenv("CAMERA_TUNING_FILE_NIGHT") or os.getenv("CAMERA_TUNING_FILE") or "").strip()
+CAMERA_SHARPNESS         = float((os.getenv("CAMERA_SHARPNESS") or "1.0").strip() or "1.0")
+CAMERA_CONTRAST          = float((os.getenv("CAMERA_CONTRAST") or "1.0").strip() or "1.0")
+CAMERA_SATURATION        = float((os.getenv("CAMERA_SATURATION") or "1.0").strip() or "1.0")
+CAMERA_EXPOSURE_TIME     = int((os.getenv("CAMERA_EXPOSURE_TIME") or "0").strip() or "0")    # µs; 0 = auto
+CAMERA_ANALOGUE_GAIN     = float((os.getenv("CAMERA_ANALOGUE_GAIN") or os.getenv("CAMERA_ANALOG_GAIN") or "0").strip() or "0")  # 0 = auto
+CAMERA_FRAME_DURATION_MAX = int((os.getenv("CAMERA_FRAME_DURATION_MAX") or "500000").strip() or "500000")  # µs
+CAMERA_EXPOSURE_VALUE_DAY   = float((os.getenv("CAMERA_EXPOSURE_VALUE_DAY") or os.getenv("CAMERA_EXPOSURE_VALUE") or "0.0").strip() or "0.0")
+CAMERA_EXPOSURE_VALUE_NIGHT = float((os.getenv("CAMERA_EXPOSURE_VALUE_NIGHT") or os.getenv("CAMERA_EXPOSURE_VALUE") or "0.0").strip() or "0.0")
 
 # Post-capture Software Cropping
 IMAGE_CROP_ENABLED = os.getenv("IMAGE_CROP_ENABLED", "false").lower() == "true"

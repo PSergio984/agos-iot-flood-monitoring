@@ -22,6 +22,8 @@ import cloudinary
 import cloudinary.uploader
 from dotenv import load_dotenv
 
+from typing import NamedTuple
+
 from camera import PersistentCamera
 from frame_quality import get_frame_quality_metrics
 
@@ -38,11 +40,17 @@ cloudinary.config(
 )
 
 
+class UploadResult(NamedTuple):
+    success: bool
+    filepath: str
+    detail: str
+
+
 def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None):
+def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None) -> UploadResult:
     """Upload a single image to Cloudinary."""
     folder = cloud_folder or f"agos/training_{label}"
     tags = ["training", f"session_{session_id}", label]
@@ -53,9 +61,9 @@ def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=Non
             tags=tags,
             context=f"session={session_id}|label={label}",
         )
-        return True, filepath, res.get("secure_url")
+        return UploadResult(success=True, filepath=filepath, detail=res.get("secure_url") or "")
     except Exception as e:
-        return False, filepath, str(e)
+        return UploadResult(success=False, filepath=filepath, detail=str(e))
 
 
 def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=None, max_workers=4):
@@ -75,16 +83,17 @@ def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=N
         completed = 0
         for future in concurrent.futures.as_completed(future_map):
             completed += 1
-            ok, fp, detail = future.result()
-            results.append((ok, fp, detail))
-            status_tag = "[OK]" if ok else "[FAIL]"
-            fname = os.path.basename(fp)
-            if ok:
-                print(f"  [{completed}/{len(filepaths)}] {status_tag} Uploaded {fname}")
+            raw = future.result()
+            result = raw if isinstance(raw, UploadResult) else UploadResult(*raw)
+            results.append(result)
+            status_tag = "[OK]" if result.success else "[FAIL]"
+            filename = os.path.basename(result.filepath)
+            if result.success:
+                print(f"  [{completed}/{len(filepaths)}] {status_tag} Uploaded {filename}")
             else:
-                print(f"  [{completed}/{len(filepaths)}] {status_tag} Failed {fname}: {detail}")
+                print(f"  [{completed}/{len(filepaths)}] {status_tag} Failed {filename}: {result.detail}")
 
-    success_count = sum(1 for ok, _, _ in results if ok)
+    success_count = sum(1 for res in results if getattr(res, "success", res[0]))
     print(f"[CLOUD] Uploads complete: {success_count}/{len(filepaths)} successful!")
     return results
 

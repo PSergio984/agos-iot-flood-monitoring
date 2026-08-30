@@ -13,20 +13,25 @@ def test_upload_to_cloudinary_success(monkeypatch):
         return {'secure_url': 'https://cdn.example.com/test.jpg'}
 
     monkeypatch.setattr(burst_capture.cloudinary.uploader, 'upload', fake_upload)
-    ok, fp, url = burst_capture.upload_to_cloudinary('test.jpg', '123', label='test')
-    assert ok is True
-    assert fp == 'test.jpg'
-    assert url == 'https://cdn.example.com/test.jpg'
+    result = burst_capture.upload_to_cloudinary('test.jpg', '123', label='test')
+    assert isinstance(result, burst_capture.UploadResult)
+    assert result.success is True
+    assert result.filepath == 'test.jpg'
+    assert result.detail == 'https://cdn.example.com/test.jpg'
+    # Test backwards-compatible tuple unpacking
+    ok, fp, url = result
+    assert ok is True and fp == 'test.jpg' and url == 'https://cdn.example.com/test.jpg'
+
 
 def test_upload_to_cloudinary_failure(monkeypatch):
     def fake_upload(filepath, folder, tags, context):
         raise RuntimeError('upload error')
 
     monkeypatch.setattr(burst_capture.cloudinary.uploader, 'upload', fake_upload)
-    ok, fp, err = burst_capture.upload_to_cloudinary('test.jpg', '123', label='test')
-    assert ok is False
-    assert fp == 'test.jpg'
-    assert 'upload error' in err
+    result = burst_capture.upload_to_cloudinary('test.jpg', '123', label='test')
+    assert result.success is False
+    assert result.filepath == 'test.jpg'
+    assert 'upload error' in result.detail
 
 def test_upload_all_concurrent(monkeypatch, tmp_path):
     files = [str(tmp_path / f'img_{i}.jpg') for i in range(5)]
