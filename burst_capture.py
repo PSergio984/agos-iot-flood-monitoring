@@ -56,14 +56,13 @@ def _ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
 
-def upload_to_cloudinary(filepath, session_id_or_context, label="raining", cloud_folder=None) -> UploadResult:
+def upload_to_cloudinary(filepath, session_id, label="raining", cloud_folder=None) -> UploadResult:
     """Upload a single image to Cloudinary."""
-    if isinstance(session_id_or_context, BurstUploadContext):
-        session_id = session_id_or_context.session_id
-        label = session_id_or_context.label
-        cloud_folder = session_id_or_context.cloud_folder
-    else:
-        session_id = session_id_or_context
+    if isinstance(session_id, BurstUploadContext):
+        ctx = session_id
+        session_id = ctx.session_id
+        label = ctx.label
+        cloud_folder = ctx.cloud_folder
 
     folder = cloud_folder or f"agos/training_{label}"
     tags = ["training", f"session_{session_id}", label]
@@ -79,15 +78,15 @@ def upload_to_cloudinary(filepath, session_id_or_context, label="raining", cloud
         return UploadResult(success=False, filepath=filepath, detail=str(e))
 
 
-def upload_all_concurrent(filepaths, session_id_or_context, label="raining", cloud_folder=None, max_workers=4):
+def upload_all_concurrent(filepaths, session_id, label="raining", cloud_folder=None, max_workers=4):
     """Upload list of image filepaths concurrently using ThreadPoolExecutor."""
     if not filepaths:
         return []
 
     context = (
-        session_id_or_context
-        if isinstance(session_id_or_context, BurstUploadContext)
-        else BurstUploadContext(session_id=str(session_id_or_context), label=label, cloud_folder=cloud_folder)
+        session_id
+        if isinstance(session_id, BurstUploadContext)
+        else BurstUploadContext(session_id=str(session_id), label=label, cloud_folder=cloud_folder)
     )
 
     workers = max(1, min(max_workers, len(filepaths)))
