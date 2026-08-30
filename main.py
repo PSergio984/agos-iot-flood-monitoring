@@ -476,6 +476,17 @@ def get_ws_client() -> PersistentWebSocketClient:
     return _ws_client
 
 
+def close_ws_client():
+    """Close active WebSocket connection and terminate its reader thread."""
+    global _ws_client
+    if _ws_client is not None:
+        try:
+            _ws_client.close()
+        except Exception:
+            pass
+        _ws_client = None
+
+
 def send_image_websocket(image_path, cloudinary_url=None, extra_metadata=None):
     """Send captured image to WebSocket server using a persistent connection.
 
@@ -508,8 +519,7 @@ water_level_filter = WaterLevelFilter(
 def signal_handler(sig, frame):
     logger.info("Shutdown requested")
     stop_event.set()
-    if _ws_client is not None:
-        _ws_client.close()
+    close_ws_client()
     try:
         _http_session.close()
     except Exception:
@@ -669,7 +679,8 @@ def camera_loop():
 
         while not stop_event.is_set():
             if is_night_sleep_hours():
-                logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused (60s deep sleep)")
+                close_ws_client()
+                logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused and WebSocket disconnected (60s deep sleep)")
                 stop_event.wait(60.0)
                 continue
 
@@ -713,7 +724,8 @@ def camera_loop():
         with PersistentCamera() as cam:
             while not stop_event.is_set():
                 if is_night_sleep_hours():
-                    logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused (60s deep sleep)")
+                    close_ws_client()
+                    logger.info("[CAMERA] Night sleep active (19:00 - 06:00) — camera paused and WebSocket disconnected (60s deep sleep)")
                     stop_event.wait(60.0)
                     continue
 
@@ -834,8 +846,7 @@ if __name__ == "__main__":
     sensor_thread.join()
     camera_thread.join()
     risk_led_thread.join()
-    if _ws_client is not None:
-        _ws_client.close()
+    close_ws_client()
     try:
         _http_session.close()
     except Exception:

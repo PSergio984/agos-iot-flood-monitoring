@@ -542,6 +542,17 @@ def test_http_session_reused_in_main():
     assert isinstance(main._http_session, requests.Session)
 
 
+def test_close_ws_client():
+    client = main.PersistentWebSocketClient(url="ws://localhost:9999/ws")
+    main._ws_client = client
+    assert main._ws_client is not None
+
+    main.close_ws_client()
+    assert main._ws_client is None
+    assert client._stop_reader.is_set()
+
+
+
 
 
 
