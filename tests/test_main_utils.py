@@ -22,6 +22,10 @@ class FakeWS:
             raise OSError("broken pipe")
         self.frames.append(("binary", payload))
 
+    def ping(self):
+        if self.should_fail:
+            raise OSError("broken pipe")
+
     def close(self):
         self.closed = True
         self.connected = False
@@ -414,6 +418,40 @@ def test_evaluate_and_gate_frame(monkeypatch, tmp_path):
     # Case 3: Unusable frame is dropped
     monkeypatch.setattr(main, "is_frame_usable", lambda p: False)
     assert main._evaluate_and_gate_frame(str(img), context_label="test") is False
+
+
+def test_persistent_websocket_heartbeat_worker(tmp_path):
+    image = tmp_path / "img.jpg"
+    image.write_bytes(b"heartbeat-test")
+
+    pings = []
+
+    class PingSpyWS(FakeWS):
+        def ping(self):
+            pings.append("ping")
+
+    spy_ws = PingSpyWS()
+    fake_module = FakeWebsocketModule(spy_ws)
+
+    # ping_interval = 0.05s for super-fast test
+    client = main.PersistentWebSocketClient(
+        url="ws://localhost:9999/ws",
+        ping_interval=0.05,
+        ws_module=fake_module,
+    )
+
+    assert client.send(str(image)) is True
+    assert client._heartbeat_thread is not None
+    assert client._heartbeat_thread.is_alive()
+
+    # Wait briefly for the heartbeat thread to send a ping
+    import time
+    time.sleep(0.12)
+    assert len(pings) >= 1
+
+    client.close()
+    assert client._stop_heartbeat.is_set()
+
 
 
 

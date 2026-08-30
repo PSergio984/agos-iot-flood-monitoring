@@ -223,11 +223,39 @@ class PersistentWebSocketClient:
         self._ws = None
         self._connected_at = 0.0
         self._lock = threading.Lock()
+        self._heartbeat_thread = None
+        self._stop_heartbeat = threading.Event()
 
     def _get_exceptions(self):
         timeout_exc = getattr(self.ws_module, "WebSocketTimeoutException", ()) if self.ws_module else ()
         closed_exc = getattr(self.ws_module, "WebSocketConnectionClosedException", ()) if self.ws_module else ()
         return timeout_exc, closed_exc
+
+    def _start_heartbeat_locked(self):
+        if self.ping_interval <= 0:
+            return
+        if self._heartbeat_thread is not None and self._heartbeat_thread.is_alive():
+            return
+        self._stop_heartbeat.clear()
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat_worker,
+            name="ws-heartbeat",
+            daemon=True,
+        )
+        self._heartbeat_thread.start()
+
+    def _heartbeat_worker(self):
+        while not self._stop_heartbeat.is_set():
+            if self._stop_heartbeat.wait(self.ping_interval):
+                break
+            with self._lock:
+                if self._ws is not None and getattr(self._ws, "connected", True):
+                    try:
+                        if hasattr(self._ws, "ping"):
+                            self._ws.ping()
+                    except Exception as e:
+                        logger.debug(f"[WS] Heartbeat ping failed: {e}")
+                        self._close_locked()
 
     def _close_locked(self):
         if self._ws is not None:
@@ -239,6 +267,7 @@ class PersistentWebSocketClient:
         self._connected_at = 0.0
 
     def close(self):
+        self._stop_heartbeat.set()
         with self._lock:
             self._close_locked()
 
@@ -269,6 +298,7 @@ class PersistentWebSocketClient:
                 extra_kwargs["ping_timeout"] = self.ping_timeout
             self._ws = self.ws_module.create_connection(self.url, timeout=10, **extra_kwargs)
             self._connected_at = time.monotonic()
+            self._start_heartbeat_locked()
             logger.info(f"[WS] Connected to {_safe_ws_url(self.url)}")
             return self._ws
         except ws_timeout_exc:
