@@ -39,6 +39,8 @@ from config import (
     SENSOR_FILTER_REBASELINE_OUTLIER_STREAK,
     SENSOR_FILTER_REBASELINE_SPREAD_MAX_CM,
     FRAME_QUALITY_CHECK_ENABLED,
+    SERVER_URL,
+    WEBSOCKET_SERVER_URL,
     RISK_SCORE_API_URL,
     RISK_SCORE_POLL_INTERVAL,
 )
@@ -64,10 +66,6 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Server configuration
-SERVER_URL = os.environ.get("SERVER_URL", "http://localhost:8000/api/v1/sensor-readings/record")
-WEBSOCKET_SERVER_URL = os.environ.get("WEBSOCKET_SERVER_URL", "")
 
 # Shared HTTP session for connection reuse / keep-alive
 _http_session = requests.Session()

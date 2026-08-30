@@ -1,4 +1,5 @@
 import os
+import urllib.parse
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -24,13 +25,37 @@ def get_env_var(key: str | list[str] | tuple[str, ...], default: str = "", cast_
     return val
 
 
+# ── Server & Device Identity ───────────────────────────────────────────────
+BACKEND_BASE_URL = get_env_var(["BACKEND_BASE_URL", "SERVER_BASE_URL", "API_BASE_URL"], "").rstrip("/")
+LOCATION_ID = get_env_var("LOCATION_ID", "1", int)
+CAMERA_DEVICE_ID = get_env_var("CAMERA_DEVICE_ID", "1", int)
+SENSOR_DEVICE_ID = get_env_var("SENSOR_DEVICE_ID", "1", int)
+IOT_API_KEY = get_env_var("IOT_API_KEY", "")
+
+
+def _derive_websocket_url() -> str:
+    explicit = get_env_var("WEBSOCKET_SERVER_URL", "")
+    if explicit:
+        return explicit
+    if not BACKEND_BASE_URL:
+        return ""
+    parsed = urllib.parse.urlparse(BACKEND_BASE_URL)
+    ws_scheme = "wss" if parsed.scheme in ("https", "wss") else "ws"
+    netloc = parsed.netloc or parsed.path
+    return f"{ws_scheme}://{netloc}/ws/rpi?camera_device_id={CAMERA_DEVICE_ID}&location_id={LOCATION_ID}"
+
+
+SERVER_URL = get_env_var(
+    "SERVER_URL",
+    f"{BACKEND_BASE_URL}/api/v1/sensor-readings/record" if BACKEND_BASE_URL else "http://localhost:8000/api/v1/sensor-readings/record",
+)
+WEBSOCKET_SERVER_URL = _derive_websocket_url()
+
 CLOUD_NAME = get_env_var("CLOUDINARY_CLOUD_NAME", "")
 API_KEY = get_env_var("CLOUDINARY_API_KEY", "")
 API_SECRET = get_env_var("CLOUDINARY_API_SECRET", "")
 CLOUDINARY_URL = get_env_var("CLOUDINARY_URL", "")
-SERVER_URL = get_env_var("SERVER_URL", "")
-IOT_API_KEY = get_env_var("IOT_API_KEY", "")
-SENSOR_DEVICE_ID = get_env_var("SENSOR_DEVICE_ID", "1", int)
+
 
 # ── Feature toggles ─────────────────────────────────────────────────────────
 ENABLE_CLOUDINARY_UPLOAD = get_env_var("ENABLE_CLOUDINARY_UPLOAD", "true", bool)
@@ -105,8 +130,11 @@ FRAME_QUALITY_MIN_CONTRAST_STDDEV = get_env_var("FRAME_QUALITY_MIN_CONTRAST_STDD
 FRAME_QUALITY_MIN_LAPLACIAN_VAR = get_env_var("FRAME_QUALITY_MIN_LAPLACIAN_VAR", "100.0", float)
 FRAME_QUALITY_RESIZE_WIDTH = get_env_var("FRAME_QUALITY_RESIZE_WIDTH", "320", int)
 
-# Fusion & Decision Engine API (leave blank to use water-level fallback only)
-RISK_SCORE_API_URL = get_env_var("RISK_SCORE_API_URL", "")
+# Fusion & Decision Engine API (auto-derived from BACKEND_BASE_URL if set)
+RISK_SCORE_API_URL = get_env_var(
+    "RISK_SCORE_API_URL",
+    f"{BACKEND_BASE_URL}/api/v1/iot/risk-score?location_id={LOCATION_ID}" if BACKEND_BASE_URL else "",
+)
 RISK_SCORE_POLL_INTERVAL = get_env_var("RISK_SCORE_POLL_INTERVAL", "10.0", float)
 
 # Water-level fallback thresholds (used when API is unreachable)

@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import config
 import main
+
 
 
 class FakeWS:
@@ -403,6 +405,38 @@ def test_config_get_env_var(monkeypatch):
     # Test invalid cast fallback
     monkeypatch.setenv("TEST_BAD_NUM", "not_a_number")
     assert config.get_env_var("TEST_BAD_NUM", "99", int) == 99
+
+
+def test_backend_base_url_derives_rest_and_websocket_urls(monkeypatch):
+    monkeypatch.setenv("BACKEND_BASE_URL", "https://example-backend.up.railway.app")
+    monkeypatch.setenv("LOCATION_ID", "2")
+    monkeypatch.setenv("CAMERA_DEVICE_ID", "3")
+    monkeypatch.setenv("SERVER_URL", "")
+    monkeypatch.setenv("WEBSOCKET_SERVER_URL", "")
+    monkeypatch.setenv("RISK_SCORE_API_URL", "")
+
+    import importlib
+    importlib.reload(config)
+
+    assert config.SERVER_URL == "https://example-backend.up.railway.app/api/v1/sensor-readings/record"
+    assert config.RISK_SCORE_API_URL == "https://example-backend.up.railway.app/api/v1/iot/risk-score?location_id=2"
+    assert config.WEBSOCKET_SERVER_URL == "wss://example-backend.up.railway.app/ws/rpi?camera_device_id=3&location_id=2"
+
+
+def test_backend_base_url_local_http_derives_ws(monkeypatch):
+    monkeypatch.setenv("BACKEND_BASE_URL", "http://192.168.1.14:8000")
+    monkeypatch.setenv("LOCATION_ID", "1")
+    monkeypatch.setenv("CAMERA_DEVICE_ID", "1")
+    monkeypatch.setenv("SERVER_URL", "")
+    monkeypatch.setenv("WEBSOCKET_SERVER_URL", "")
+
+    import importlib
+    importlib.reload(config)
+
+    assert config.SERVER_URL == "http://192.168.1.14:8000/api/v1/sensor-readings/record"
+    assert config.WEBSOCKET_SERVER_URL == "ws://192.168.1.14:8000/ws/rpi?camera_device_id=1&location_id=1"
+
+
 
 
 def test_evaluate_and_gate_frame(monkeypatch, tmp_path):
