@@ -437,6 +437,19 @@ def test_backend_base_url_local_http_derives_ws(monkeypatch):
     assert config.WEBSOCKET_SERVER_URL == "ws://192.168.1.14:8000/ws/rpi?camera_device_id=1&location_id=1"
 
 
+def test_relative_risk_score_url_prepends_base_url(monkeypatch):
+    monkeypatch.setenv("BACKEND_BASE_URL", "")
+    monkeypatch.setenv("SERVER_URL", "https://example-backend.up.railway.app/api/v1/sensor-readings/record")
+    monkeypatch.setenv("WEBSOCKET_SERVER_URL", "wss://example-backend.up.railway.app/ws/rpi?camera_device_id=1&location_id=1")
+    monkeypatch.setenv("RISK_SCORE_API_URL", "/api/v1/iot/risk-score?location_id=1")
+
+    import importlib
+    importlib.reload(config)
+
+    assert config.RISK_SCORE_API_URL == "https://example-backend.up.railway.app/api/v1/iot/risk-score?location_id=1"
+
+
+
 
 
 def test_evaluate_and_gate_frame(monkeypatch, tmp_path):

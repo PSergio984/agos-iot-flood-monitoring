@@ -31,17 +31,29 @@ ENDPOINT_RISK_SCORE = "/api/v1/iot/risk-score"
 ENDPOINT_WEBSOCKET_RPI = "/ws/rpi"
 
 # ── Server & Device Identity ───────────────────────────────────────────────
-BACKEND_BASE_URL = get_env_var(["BACKEND_BASE_URL", "SERVER_BASE_URL", "API_BASE_URL"], "").rstrip("/")
 LOCATION_ID = get_env_var("LOCATION_ID", "1", int)
 CAMERA_DEVICE_ID = get_env_var("CAMERA_DEVICE_ID", "1", int)
 SENSOR_DEVICE_ID = get_env_var("SENSOR_DEVICE_ID", "1", int)
 IOT_API_KEY = get_env_var("IOT_API_KEY", "")
 
+# Base URL resolution with fallback extraction from SERVER_URL or WEBSOCKET_SERVER_URL
+BACKEND_BASE_URL = get_env_var(["BACKEND_BASE_URL", "SERVER_BASE_URL", "API_BASE_URL"], "").rstrip("/")
+_raw_server_url = get_env_var("SERVER_URL", "")
+_raw_ws_url = get_env_var("WEBSOCKET_SERVER_URL", "")
+
+if not BACKEND_BASE_URL:
+    if _raw_server_url and "://" in _raw_server_url:
+        _p = urllib.parse.urlparse(_raw_server_url)
+        BACKEND_BASE_URL = f"{_p.scheme}://{_p.netloc}".rstrip("/")
+    elif _raw_ws_url and "://" in _raw_ws_url:
+        _p = urllib.parse.urlparse(_raw_ws_url)
+        _scheme = "https" if _p.scheme == "wss" else "http"
+        BACKEND_BASE_URL = f"{_scheme}://{_p.netloc}".rstrip("/")
+
 
 def _derive_websocket_url() -> str:
-    explicit = get_env_var("WEBSOCKET_SERVER_URL", "")
-    if explicit:
-        return explicit
+    if _raw_ws_url:
+        return _raw_ws_url
     if not BACKEND_BASE_URL:
         return ""
     parsed = urllib.parse.urlparse(BACKEND_BASE_URL)
@@ -50,11 +62,21 @@ def _derive_websocket_url() -> str:
     return f"{ws_scheme}://{netloc}{ENDPOINT_WEBSOCKET_RPI}?camera_device_id={CAMERA_DEVICE_ID}&location_id={LOCATION_ID}"
 
 
-SERVER_URL = get_env_var(
-    "SERVER_URL",
-    f"{BACKEND_BASE_URL}{ENDPOINT_SENSOR_RECORD}" if BACKEND_BASE_URL else f"http://localhost:8000{ENDPOINT_SENSOR_RECORD}",
-)
+def _normalize_endpoint_url(raw_url: str, default_path: str, default_query: str = "") -> str:
+    if raw_url:
+        # If user passed a relative path (e.g. "/api/v1/iot/risk-score?location_id=1"), prepend base URL
+        if raw_url.startswith("/"):
+            return f"{BACKEND_BASE_URL}{raw_url}" if BACKEND_BASE_URL else raw_url
+        return raw_url
+    if BACKEND_BASE_URL:
+        query_suffix = f"?{default_query}" if default_query else ""
+        return f"{BACKEND_BASE_URL}{default_path}{query_suffix}"
+    return f"http://localhost:8000{default_path}" if not default_query else f"http://localhost:8000{default_path}?{default_query}"
+
+
+SERVER_URL = _normalize_endpoint_url(_raw_server_url, ENDPOINT_SENSOR_RECORD)
 WEBSOCKET_SERVER_URL = _derive_websocket_url()
+
 
 CLOUD_NAME = get_env_var("CLOUDINARY_CLOUD_NAME", "")
 API_KEY = get_env_var("CLOUDINARY_API_KEY", "")
@@ -136,9 +158,11 @@ FRAME_QUALITY_MIN_LAPLACIAN_VAR = get_env_var("FRAME_QUALITY_MIN_LAPLACIAN_VAR",
 FRAME_QUALITY_RESIZE_WIDTH = get_env_var("FRAME_QUALITY_RESIZE_WIDTH", "320", int)
 
 # Fusion & Decision Engine API (auto-derived from BACKEND_BASE_URL if set)
-RISK_SCORE_API_URL = get_env_var(
-    "RISK_SCORE_API_URL",
-    f"{BACKEND_BASE_URL}{ENDPOINT_RISK_SCORE}?location_id={LOCATION_ID}" if BACKEND_BASE_URL else "",
+_raw_risk_url = get_env_var("RISK_SCORE_API_URL", "")
+RISK_SCORE_API_URL = _normalize_endpoint_url(
+    _raw_risk_url,
+    ENDPOINT_RISK_SCORE,
+    default_query=f"location_id={LOCATION_ID}",
 )
 RISK_SCORE_POLL_INTERVAL = get_env_var("RISK_SCORE_POLL_INTERVAL", "10.0", float)
 
