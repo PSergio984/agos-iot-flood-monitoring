@@ -66,3 +66,16 @@ def test_risk_led_config_defaults():
     assert isinstance(config.RISK_LED_ENABLED, bool)
     assert config.RISK_LED_ENABLED is True
 
+
+def test_risk_led_config_env_override(monkeypatch):
+    import importlib
+
+    monkeypatch.setenv("RISK_LED_ENABLED", "false")
+    importlib.reload(config)
+    try:
+        assert config.RISK_LED_ENABLED is False
+    finally:
+        monkeypatch.delenv("RISK_LED_ENABLED", raising=False)
+        importlib.reload(config)
+
+
