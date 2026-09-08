@@ -41,6 +41,7 @@ from config import (
     FRAME_QUALITY_CHECK_ENABLED,
     SERVER_URL,
     WEBSOCKET_SERVER_URL,
+    RISK_LED_ENABLED,
     RISK_SCORE_API_URL,
     RISK_SCORE_POLL_INTERVAL,
 )
@@ -832,11 +833,16 @@ if __name__ == "__main__":
     camera_thread = threading.Thread(target=camera_loop, name="camera", daemon=True)
     risk_led_thread = threading.Thread(target=risk_led_loop, name="risk_led", daemon=True)
 
+    risk_led_mode = (
+        "disabled"
+        if not RISK_LED_ENABLED
+        else ("API" if RISK_SCORE_API_URL else "water-level fallback")
+    )
     logger.info(
         f"AGOS starting — sensor={SENSOR_INTERVAL}s interval, "
         f"camera={CAMERA_INTERVAL}s interval "
         f"({f'{1 / CAMERA_INTERVAL:.1f}' if CAMERA_INTERVAL else '∞'} fps), "
-        f"RISK_LED={'API' if RISK_SCORE_API_URL else 'water-level fallback'}"
+        f"RISK_LED={risk_led_mode}"
     )
     sensor_thread.start()
     camera_thread.start()

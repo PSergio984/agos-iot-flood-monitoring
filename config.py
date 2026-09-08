@@ -129,6 +129,7 @@ SENSOR_TEMPERATURE_C = get_env_var("SENSOR_TEMPERATURE_C", "", float)
 # Use -1 to disable a specific state LED.
 # Backward compatibility: falls back to legacy color-based env vars when
 # the new names are not present.
+RISK_LED_ENABLED = get_env_var("RISK_LED_ENABLED", "true", bool)
 RISK_LED_CRITICAL_PIN = get_env_var(["RISK_LED_CRITICAL_PIN", "RISK_LED_RED_PIN"], "14", int)
 RISK_LED_WARNING_PIN = get_env_var(["RISK_LED_WARNING_PIN", "RISK_LED_YELLOW_PIN"], "18", int)
 RISK_LED_SAFE_PIN = get_env_var(["RISK_LED_SAFE_PIN", "RISK_LED_GREEN_PIN"], "15", int)

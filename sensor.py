@@ -12,6 +12,7 @@ from config import (
     SENSOR_BURST_MIN_VALID,
     SENSOR_BURST_SAMPLE_DELAY_S,
     SENSOR_TEMPERATURE_C,
+    RISK_LED_ENABLED,
     RISK_LED_CRITICAL_PIN,
     RISK_LED_WARNING_PIN,
     RISK_LED_SAFE_PIN,
@@ -100,12 +101,15 @@ def _init_gpio():
             for pin in configured_pins:
                 GPIO.setup(pin, GPIO.OUT)
                 GPIO.output(pin, GPIO.LOW)
-            print(
-                "[GPIO] Risk LED pins initialized: "
-                f"critical={RISK_LED_CRITICAL_PIN} "
-                f"warning={RISK_LED_WARNING_PIN} "
-                f"safe={RISK_LED_SAFE_PIN}"
-            )
+            if RISK_LED_ENABLED:
+                print(
+                    "[GPIO] Risk LED pins initialized: "
+                    f"critical={RISK_LED_CRITICAL_PIN} "
+                    f"warning={RISK_LED_WARNING_PIN} "
+                    f"safe={RISK_LED_SAFE_PIN}"
+                )
+            else:
+                print("[GPIO] Risk LEDs disabled by config (pins forced LOW)")
         else:
             print("[GPIO] Risk LEDs disabled (all state pins are set to -1)")
 
@@ -207,6 +211,13 @@ def update_risk_led(combined_risk_score):
         tier = "critical"
 
     active_pin = RISK_LED_PIN_MAP.get(tier, -1)
+
+    if not RISK_LED_ENABLED:
+        logger.info(
+            f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
+            f"active_pin={active_pin} (disabled by config)"
+        )
+        return
 
     configured_pins = _configured_risk_led_pins()
     if not configured_pins:
