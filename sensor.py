@@ -18,6 +18,7 @@ from config import (
     RISK_LED_SAFE_PIN,
     RISK_FALLBACK_SAFE_ABOVE_CM,
     RISK_FALLBACK_WARNING_ABOVE_CM,
+    RISK_SCORE_API_URL,
 )
 
 logger = logging.getLogger(__name__)
@@ -102,21 +103,21 @@ def _init_gpio():
                 GPIO.setup(pin, GPIO.OUT)
                 GPIO.output(pin, GPIO.LOW)
             if RISK_LED_ENABLED:
-                print(
+                logger.info(
                     "[GPIO] Risk LED pins initialized: "
                     f"critical={RISK_LED_CRITICAL_PIN} "
                     f"warning={RISK_LED_WARNING_PIN} "
                     f"safe={RISK_LED_SAFE_PIN}"
                 )
             else:
-                print("[GPIO] Risk LEDs disabled by config (pins forced LOW)")
+                logger.info("[GPIO] Risk LEDs disabled by config (pins forced LOW)")
         else:
-            print("[GPIO] Risk LEDs disabled (all state pins are set to -1)")
+            logger.info("[GPIO] Risk LEDs disabled (all state pins are set to -1)")
 
         gpio_initialized = True
         # Register cleanup to run at exit
         atexit.register(GPIO.cleanup)
-        print("[GPIO] Initialized successfully")
+        logger.info("[GPIO] Initialized successfully")
 
 
 def _read_single_distance_cm():
@@ -255,6 +256,14 @@ def update_risk_led(combined_risk_score):
         f"[LED] Risk score={combined_risk_score} tier={tier.upper()} "
         f"active_pin={active_pin}"
     )
+
+
+def get_risk_led_mode():
+    """Return human-readable mode string for risk LED indicator."""
+    if not RISK_LED_ENABLED:
+        return "disabled"
+    return "API" if RISK_SCORE_API_URL else "water-level fallback"
+
 
 
 # Initialize GPIO when module is imported (skip in mock mode)

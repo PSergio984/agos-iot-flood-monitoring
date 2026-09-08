@@ -54,7 +54,7 @@ from camera import (
     is_twilight_hours,
 )
 from frame_quality import get_frame_quality_metrics, is_frame_usable, is_frame_dark, is_frame_obscured
-from sensor import get_water_level, update_risk_led, water_level_to_risk_score
+from sensor import get_risk_led_mode, get_water_level, update_risk_led, water_level_to_risk_score
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
 
@@ -778,6 +778,12 @@ def risk_led_loop():
     When the API is unreachable or not configured, the sensor_loop
     drives the LED via the water-level fallback instead.
     """
+    if not RISK_LED_ENABLED:
+        logger.info(
+            "[LED] RISK_LED_ENABLED is false — risk LED poller stopped"
+        )
+        return
+
     if not RISK_SCORE_API_URL:
         logger.info(
             "[LED] RISK_SCORE_API_URL not configured — "
@@ -831,27 +837,28 @@ if __name__ == "__main__":
 
     sensor_thread = threading.Thread(target=sensor_loop, name="sensor", daemon=True)
     camera_thread = threading.Thread(target=camera_loop, name="camera", daemon=True)
-    risk_led_thread = threading.Thread(target=risk_led_loop, name="risk_led", daemon=True)
-
-    risk_led_mode = (
-        "disabled"
-        if not RISK_LED_ENABLED
-        else ("API" if RISK_SCORE_API_URL else "water-level fallback")
+    risk_led_thread = (
+        threading.Thread(target=risk_led_loop, name="risk_led", daemon=True)
+        if RISK_LED_ENABLED
+        else None
     )
+
     logger.info(
         f"AGOS starting — sensor={SENSOR_INTERVAL}s interval, "
         f"camera={CAMERA_INTERVAL}s interval "
         f"({f'{1 / CAMERA_INTERVAL:.1f}' if CAMERA_INTERVAL else '∞'} fps), "
-        f"RISK_LED={risk_led_mode}"
+        f"RISK_LED={get_risk_led_mode()}"
     )
     sensor_thread.start()
     camera_thread.start()
-    risk_led_thread.start()
+    if risk_led_thread is not None:
+        risk_led_thread.start()
 
     # Block the main thread until all workers exit after stop_event is set.
     sensor_thread.join()
     camera_thread.join()
-    risk_led_thread.join()
+    if risk_led_thread is not None:
+        risk_led_thread.join()
     close_ws_client()
     try:
         _http_session.close()

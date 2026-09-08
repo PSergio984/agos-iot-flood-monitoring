@@ -1,3 +1,4 @@
+import pytest
 import sensor
 
 
@@ -41,8 +42,43 @@ def test_update_risk_led_logs_score_and_pin_when_gpio_unavailable(monkeypatch, c
     assert "Risk score=80 tier=CRITICAL active_pin=3" in caplog.text
 
 
-def test_update_risk_led_disabled_by_config(monkeypatch, caplog):
+class FakeGPIO:
+    BCM = "BCM"
+    OUT = "OUT"
+    IN = "IN"
+    LOW = 0
+    HIGH = 1
+
+    def __init__(self):
+        self.calls = []
+
+    def setmode(self, mode):
+        self.calls.append(("setmode", mode))
+
+    def setup(self, pin, mode):
+        self.calls.append(("setup", pin, mode))
+
+    def output(self, pin, value):
+        self.calls.append(("output", pin, value))
+
+    def cleanup(self):
+        self.calls.append(("cleanup",))
+
+
+@pytest.fixture
+def fake_gpio(monkeypatch):
+    import sys
+
+    gpio = FakeGPIO()
+    monkeypatch.setitem(sys.modules, "RPi", type(sys)("RPi"))
+    monkeypatch.setitem(sys.modules, "RPi.GPIO", gpio)
+    return gpio
+
+
+def test_update_risk_led_disabled_by_config(monkeypatch, fake_gpio, caplog):
     monkeypatch.setattr(sensor, "RISK_LED_ENABLED", False)
+    monkeypatch.setattr(sensor, "MOCK", False)
+    monkeypatch.setattr(sensor, "GPIO_AVAILABLE", True)
     monkeypatch.setattr(
         sensor,
         "RISK_LED_PIN_MAP",
@@ -53,35 +89,11 @@ def test_update_risk_led_disabled_by_config(monkeypatch, caplog):
         sensor.update_risk_led(20)
 
     assert "Risk score=20 tier=SAFE active_pin=1 (disabled by config)" in caplog.text
+    # Verify no GPIO output was driven HIGH
+    assert not any(call[0] == "output" and call[2] == FakeGPIO.HIGH for call in fake_gpio.calls)
 
 
-def test_init_gpio_pins_low_when_disabled(monkeypatch, capsys):
-    calls = []
-
-    class FakeGPIO:
-        BCM = "BCM"
-        OUT = "OUT"
-        IN = "IN"
-        LOW = 0
-
-        @classmethod
-        def setmode(cls, mode):
-            pass
-
-        @classmethod
-        def setup(cls, pin, mode):
-            calls.append(("setup", pin, mode))
-
-        @classmethod
-        def output(cls, pin, value):
-            calls.append(("output", pin, value))
-
-        @classmethod
-        def cleanup(cls):
-            pass
-
-    import sys
-
+def test_init_gpio_pins_low_when_disabled(monkeypatch, fake_gpio, caplog):
     monkeypatch.setattr(sensor, "gpio_initialized", False)
     monkeypatch.setattr(sensor, "GPIO_AVAILABLE", True)
     monkeypatch.setattr(sensor, "MOCK", False)
@@ -94,17 +106,27 @@ def test_init_gpio_pins_low_when_disabled(monkeypatch, capsys):
         "RISK_LED_PIN_MAP",
         {"critical": 14, "warning": 18, "safe": 15},
     )
-    monkeypatch.setitem(sys.modules, "RPi", type(sys)("RPi"))
-    monkeypatch.setitem(sys.modules, "RPi.GPIO", FakeGPIO)
 
-    sensor._init_gpio()
+    with caplog.at_level("INFO"):
+        sensor._init_gpio()
 
-    out = capsys.readouterr().out
-    assert "[GPIO] Risk LEDs disabled by config (pins forced LOW)" in out
-    assert ("setup", 14, "OUT") in calls
-    assert ("output", 14, 0) in calls
-    assert ("setup", 18, "OUT") in calls
-    assert ("output", 18, 0) in calls
-    assert ("setup", 15, "OUT") in calls
-    assert ("output", 15, 0) in calls
+    assert "[GPIO] Risk LEDs disabled by config (pins forced LOW)" in caplog.text
+    assert ("setup", 14, "OUT") in fake_gpio.calls
+    assert ("output", 14, 0) in fake_gpio.calls
+    assert ("setup", 18, "OUT") in fake_gpio.calls
+    assert ("output", 18, 0) in fake_gpio.calls
+    assert ("setup", 15, "OUT") in fake_gpio.calls
+    assert ("output", 15, 0) in fake_gpio.calls
+
+
+def test_get_risk_led_mode(monkeypatch):
+    monkeypatch.setattr(sensor, "RISK_LED_ENABLED", False)
+    assert sensor.get_risk_led_mode() == "disabled"
+
+    monkeypatch.setattr(sensor, "RISK_LED_ENABLED", True)
+    monkeypatch.setattr(sensor, "RISK_SCORE_API_URL", "http://example.com")
+    assert sensor.get_risk_led_mode() == "API"
+
+    monkeypatch.setattr(sensor, "RISK_SCORE_API_URL", "")
+    assert sensor.get_risk_led_mode() == "water-level fallback"
 

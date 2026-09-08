@@ -39,7 +39,6 @@ def test_frame_quality_config_types_and_basic_constraints():
     assert isinstance(config.CAMERA_SEND_PRECAPTURE_STATUS_IMAGE, bool)
     assert isinstance(config.SENSOR_TRIG_PIN, int)
     assert isinstance(config.SENSOR_ECHO_PIN, int)
-    assert isinstance(config.RISK_LED_ENABLED, bool)
     assert isinstance(config.RISK_LED_CRITICAL_PIN, int)
     assert isinstance(config.RISK_LED_WARNING_PIN, int)
     assert isinstance(config.RISK_LED_SAFE_PIN, int)
@@ -61,3 +60,9 @@ def test_frame_quality_config_types_and_basic_constraints():
     assert config.RISK_LED_CRITICAL_PIN >= -1
     assert config.RISK_LED_WARNING_PIN >= -1
     assert config.RISK_LED_SAFE_PIN >= -1
+
+
+def test_risk_led_config_defaults():
+    assert isinstance(config.RISK_LED_ENABLED, bool)
+    assert config.RISK_LED_ENABLED is True
+
