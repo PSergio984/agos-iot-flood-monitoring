@@ -10,11 +10,15 @@ import os
 import sys
 import time
 
+from dotenv import load_dotenv
+
 from config import (
     RISK_LED_CRITICAL_PIN,
     RISK_LED_SAFE_PIN,
     RISK_LED_WARNING_PIN,
 )
+
+load_dotenv()
 
 # Auto-detect mock mode or hardware availability
 MOCK = os.getenv("MOCK_MODE", "false").lower() == "true"
@@ -124,11 +128,13 @@ def _set_gpio_pins_level(pins, level):
 
 def _run_real_gpio_test(pins, duration, hold, blink):
     """Drive real Raspberry Pi GPIO pins."""
+    setup_successful = False
     try:
         GPIO.setmode(GPIO.BCM)
         for pin in pins:
             GPIO.setup(pin, GPIO.OUT)
             GPIO.output(pin, GPIO.LOW)
+        setup_successful = True
 
         if blink:
             print("[GPIO] Blinking all pins (press Ctrl+C to exit)...")
@@ -163,7 +169,8 @@ def _run_real_gpio_test(pins, duration, hold, blink):
                 GPIO.cleanup()
             except Exception:
                 pass
-        print("[GPIO] Cleanup complete. All pins safely OFF.")
+        if setup_successful:
+            print("[GPIO] Cleanup complete. All pins safely OFF.")
 
 
 def main(argv=None):
@@ -172,7 +179,11 @@ def main(argv=None):
 
     if args.pins:
         try:
-            pins = [int(p.strip()) for p in args.pins.split(",") if p.strip()]
+            parsed_pins = [int(p.strip()) for p in args.pins.split(",") if p.strip()]
+            if not parsed_pins or any(p < 0 for p in parsed_pins):
+                print(f"[ERROR] Invalid --pins value: '{args.pins}'. Pin numbers cannot be negative.")
+                sys.exit(1)
+            pins = parsed_pins
         except ValueError:
             print(f"[ERROR] Invalid --pins format: '{args.pins}'. Must be comma-separated integers.")
             sys.exit(1)

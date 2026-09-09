@@ -115,3 +115,60 @@ def test_main_invalid_pins(capsys):
     assert exc_info.value.code == 1
     out = capsys.readouterr().out
     assert "Invalid --pins format" in out
+
+
+def test_main_negative_pins(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        test_leds.main(["--pins", "14,-1"])
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "Pin numbers cannot be negative" in out
+
+    with pytest.raises(SystemExit) as exc_info2:
+        test_leds.main(["--pins=-1,15"])
+    assert exc_info2.value.code == 1
+    out2 = capsys.readouterr().out
+    assert "Pin numbers cannot be negative" in out2
+
+
+def test_run_real_gpio_test_sequence(fake_gpio):
+    test_leds.run_led_test([14, 18], duration=0.01, mock=False)
+    expected_order = [
+        ("setmode", "BCM"),
+        ("setup", 14, "OUT"),
+        ("output", 14, 0),
+        ("setup", 18, "OUT"),
+        ("output", 18, 0),
+        ("output", 14, 1),
+        ("output", 18, 1),
+        ("output", 14, 0),
+        ("output", 18, 0),
+        ("output", 14, 0),
+        ("output", 18, 0),
+        ("cleanup", [14, 18]),
+    ]
+    assert fake_gpio.calls == expected_order
+
+
+def test_run_real_gpio_test_keyboard_interrupt(fake_gpio, monkeypatch, capsys):
+    def mock_sleep(d):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(test_leds.time, "sleep", mock_sleep)
+    test_leds.run_led_test([14, 18], duration=1.0, mock=False)
+    out = capsys.readouterr().out
+    assert "Test interrupted by user." in out
+    assert ("cleanup", [14, 18]) in fake_gpio.calls
+    assert "Cleanup complete. All pins safely OFF." in out
+
+
+def test_run_real_gpio_setup_failure(fake_gpio, monkeypatch, capsys):
+    def failing_setup(pin, mode):
+        raise RuntimeError("Simulated GPIO setup failure")
+
+    monkeypatch.setattr(fake_gpio, "setup", failing_setup)
+    with pytest.raises(RuntimeError, match="Simulated GPIO setup failure"):
+        test_leds.run_led_test([14], duration=0.01, mock=False)
+    out = capsys.readouterr().out
+    assert "Cleanup complete" not in out
+
