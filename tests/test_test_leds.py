@@ -48,16 +48,31 @@ def test_parse_args_custom():
     args = test_leds.parse_args(["--duration", "1.5", "--hold", "--pins", "14,18"])
     assert args.duration == 1.5
     assert args.hold is True
+    assert args.blink is False
     assert args.pins == "14,18"
 
 
+def test_parse_args_blink():
+    args = test_leds.parse_args(["--blink"])
+    assert args.blink is True
+    assert args.hold is False
+
+
+def test_parse_args_mutually_exclusive_hold_and_blink():
+    with pytest.raises(SystemExit):
+        test_leds.parse_args(["--hold", "--blink"])
+
+
 def test_get_default_pins(monkeypatch):
-    monkeypatch.setattr(test_leds, "RISK_LED_SAFE_PIN", 15)
+    monkeypatch.setattr(test_leds, "RISK_LED_CRITICAL_PIN", 14)
     monkeypatch.setattr(test_leds, "RISK_LED_WARNING_PIN", 18)
-    monkeypatch.setattr(test_leds, "RISK_LED_CRITICAL_PIN", -1)
+    monkeypatch.setattr(test_leds, "RISK_LED_SAFE_PIN", 15)
 
     pins = test_leds.get_default_pins()
-    assert pins == [15, 18]
+    assert pins == [14, 18, 15]
+
+    monkeypatch.setattr(test_leds, "RISK_LED_WARNING_PIN", -1)
+    assert test_leds.get_default_pins() == [14, 15]
 
 
 def test_run_led_test_empty_pins(capsys):

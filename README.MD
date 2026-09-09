@@ -256,6 +256,13 @@ These defaults are configurable through environment variables:
 
 ---
 
+## 🛠️ Testing & Diagnostic Utilities
+
+- **`test_leds.py`**: Standalone diagnostic tool to drive all configured indicator LEDs simultaneously for hardware, wiring, and pin validation (`--duration`, `--hold`, `--blink`, `--pins`).
+- **`live_sensor_test.py`**: Live polling utility for JSN-SR04T ultrasonic distance readings without camera or backend transmission overhead.
+
+---
+
 **Institution:** Pamantasan ng Lungsod ng Valenzuela
 **Department:** College of Engineering & Information Technology — IT Department
 **Completion:** October 2026

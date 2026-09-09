@@ -28,7 +28,7 @@ except ImportError:
 def get_default_pins():
     """Return configured risk LED pins filtering out disabled (-1) pins."""
     configured = []
-    for pin in [RISK_LED_SAFE_PIN, RISK_LED_WARNING_PIN, RISK_LED_CRITICAL_PIN]:
+    for pin in [RISK_LED_CRITICAL_PIN, RISK_LED_WARNING_PIN, RISK_LED_SAFE_PIN]:
         if pin is not None and pin >= 0 and pin not in configured:
             configured.append(pin)
     return configured
@@ -45,12 +45,13 @@ def parse_args(argv=None):
         default=3.0,
         help="Duration in seconds to hold LEDs ON in default mode (default: 3.0)",
     )
-    parser.add_argument(
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--hold",
         action="store_true",
         help="Hold all LEDs ON continuously until Ctrl+C is pressed",
     )
-    parser.add_argument(
+    mode_group.add_argument(
         "--blink",
         action="store_true",
         help="Blink all LEDs simultaneously (0.5s cycle) until Ctrl+C is pressed",
@@ -115,36 +116,37 @@ def _run_mock_test(pins, duration, hold, blink):
         print(f"\n[MOCK] [{time.strftime('%H:%M:%S')}] Stopped by user. All pins {pins} -> [OFF]")
 
 
+def _set_gpio_pins_level(pins, level):
+    """Set the same output logic level across all pins."""
+    for pin in pins:
+        GPIO.output(pin, level)
+
+
 def _run_real_gpio_test(pins, duration, hold, blink):
     """Drive real Raspberry Pi GPIO pins."""
-    GPIO.setmode(GPIO.BCM)
-    for pin in pins:
-        GPIO.setup(pin, GPIO.OUT)
-        GPIO.output(pin, GPIO.LOW)
-
     try:
+        GPIO.setmode(GPIO.BCM)
+        for pin in pins:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+
         if blink:
             print("[GPIO] Blinking all pins (press Ctrl+C to exit)...")
             while True:
-                for pin in pins:
-                    GPIO.output(pin, GPIO.HIGH)
+                _set_gpio_pins_level(pins, GPIO.HIGH)
                 time.sleep(0.5)
-                for pin in pins:
-                    GPIO.output(pin, GPIO.LOW)
+                _set_gpio_pins_level(pins, GPIO.LOW)
                 time.sleep(0.5)
         elif hold:
             print("[GPIO] Driving all pins HIGH (press Ctrl+C to exit)...")
-            for pin in pins:
-                GPIO.output(pin, GPIO.HIGH)
+            _set_gpio_pins_level(pins, GPIO.HIGH)
             while True:
                 time.sleep(1.0)
         else:
             print(f"[GPIO] Driving all pins HIGH for {duration}s...")
-            for pin in pins:
-                GPIO.output(pin, GPIO.HIGH)
+            _set_gpio_pins_level(pins, GPIO.HIGH)
             time.sleep(duration)
-            for pin in pins:
-                GPIO.output(pin, GPIO.LOW)
+            _set_gpio_pins_level(pins, GPIO.LOW)
             print("[GPIO] Turned all pins LOW. Test completed.")
     except KeyboardInterrupt:
         print("\n[GPIO] Test interrupted by user.")
