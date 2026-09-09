@@ -104,6 +104,7 @@ def test_run_real_gpio_test(fake_gpio, capsys):
 
 
 def test_main_with_valid_args(monkeypatch, capsys):
+    monkeypatch.setattr(test_leds, "MOCK", True)
     test_leds.main(["--duration", "0.01", "--pins", "14,15"])
     out = capsys.readouterr().out
     assert "Target BCM Pins: [14, 15]" in out
@@ -115,6 +116,18 @@ def test_main_invalid_pins(capsys):
     assert exc_info.value.code == 1
     out = capsys.readouterr().out
     assert "Invalid --pins format" in out
+
+
+def test_main_empty_pins(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        test_leds.main(["--pins", ""])
+    assert exc_info.value.code == 1
+    assert "Must specify at least one pin number" in capsys.readouterr().out
+
+    with pytest.raises(SystemExit) as exc_info2:
+        test_leds.main(["--pins", "   "])
+    assert exc_info2.value.code == 1
+    assert "Must specify at least one pin number" in capsys.readouterr().out
 
 
 def test_main_negative_pins(capsys):
@@ -129,6 +142,13 @@ def test_main_negative_pins(capsys):
     assert exc_info2.value.code == 1
     out2 = capsys.readouterr().out
     assert "Pin numbers cannot be negative" in out2
+
+
+def test_get_default_pins_no_dedup(monkeypatch):
+    monkeypatch.setattr(test_leds, "RISK_LED_CRITICAL_PIN", 14)
+    monkeypatch.setattr(test_leds, "RISK_LED_WARNING_PIN", 14)
+    monkeypatch.setattr(test_leds, "RISK_LED_SAFE_PIN", 15)
+    assert test_leds.get_default_pins() == [14, 14, 15]
 
 
 def test_run_real_gpio_test_sequence(fake_gpio):
@@ -160,6 +180,53 @@ def test_run_real_gpio_test_keyboard_interrupt(fake_gpio, monkeypatch, capsys):
     assert "Test interrupted by user." in out
     assert ("cleanup", [14, 18]) in fake_gpio.calls
     assert "Cleanup complete. All pins safely OFF." in out
+
+
+def test_run_real_gpio_test_blink(fake_gpio, monkeypatch, capsys):
+    count = 0
+
+    def mock_sleep(d):
+        nonlocal count
+        count += 1
+        if count >= 2:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(test_leds.time, "sleep", mock_sleep)
+    test_leds.run_led_test([14], blink=True, mock=False)
+    out = capsys.readouterr().out
+    assert "Blinking all pins" in out
+    assert ("output", 14, FakeGPIO.HIGH) in fake_gpio.calls
+    assert ("output", 14, FakeGPIO.LOW) in fake_gpio.calls
+    assert ("cleanup", [14]) in fake_gpio.calls
+    assert "Cleanup complete. All pins safely OFF." in out
+
+
+def test_run_mock_test_blink(monkeypatch, capsys):
+    count = 0
+
+    def mock_sleep(d):
+        nonlocal count
+        count += 1
+        if count >= 2:
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(test_leds.time, "sleep", mock_sleep)
+    test_leds.run_led_test([14], blink=True, mock=True)
+    out = capsys.readouterr().out
+    assert "Starting blink loop" in out
+    assert "All pins [14] -> [ON]" in out
+    assert "Stopped by user" in out
+
+
+def test_run_mock_test_hold(monkeypatch, capsys):
+    def mock_sleep(d):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(test_leds.time, "sleep", mock_sleep)
+    test_leds.run_led_test([14], hold=True, mock=True)
+    out = capsys.readouterr().out
+    assert "Holding until Ctrl+C" in out
+    assert "Stopped by user" in out
 
 
 def test_run_real_gpio_setup_failure(fake_gpio, monkeypatch, capsys):
