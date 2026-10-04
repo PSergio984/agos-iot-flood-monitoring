@@ -24,8 +24,22 @@ def _get_mock_wifi_signal_strength() -> int:
         return MOCK_WIFI_RSSI_DEFAULT
 
 
+def _normalize_rssi(raw_level: float) -> int | None:
+    """Convert raw driver signal level to signed dBm integer, or None if inactive."""
+    # 0.0 indicates unassociated / no link
+    if raw_level == 0.0:
+        return None
+    if raw_level > 0.0:
+        raw_level = raw_level - 256.0
+    rssi = int(round(raw_level))
+    # Valid Wi-Fi RSSI in dBm is negative (typically -20 to -100 dBm)
+    if rssi >= 0 or rssi < -120:
+        return None
+    return rssi
+
+
 def parse_proc_net_wireless(content: str) -> dict[str, int]:
-    """Parse /proc/net/wireless content into a mapping of interface -> RSSI in dBm."""
+    """Parse /proc/net/wireless content into a mapping of active interface -> RSSI in dBm."""
     results: dict[str, int] = {}
     lines = content.splitlines()
     for line in lines:
@@ -38,11 +52,13 @@ def parse_proc_net_wireless(content: str) -> dict[str, int]:
             continue
         try:
             # tokens[0] is status, tokens[1] is link quality, tokens[2] is level (dBm)
-            raw_level_str = tokens[2].rstrip(".")
-            raw_level = float(raw_level_str)
-            if raw_level > 0:
-                raw_level = raw_level - 256.0
-            results[iface] = int(round(raw_level))
+            link_quality = float(tokens[1].rstrip("."))
+            raw_level = float(tokens[2].rstrip("."))
+            if link_quality == 0.0 and raw_level == 0.0:
+                continue
+            rssi = _normalize_rssi(raw_level)
+            if rssi is not None:
+                results[iface] = rssi
         except (ValueError, IndexError):
             continue
     return results
@@ -54,46 +70,38 @@ def _read_proc_wireless() -> str:
         return f.read()
 
 
+def _run_cmd(cmd: list[str]) -> str | None:
+    """Safely execute an external CLI tool, returning stdout on success."""
+    try:
+        res = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=1,
+            check=False,
+        )
+        if res.returncode == 0 and res.stdout:
+            return res.stdout
+    except (FileNotFoundError, PermissionError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def _query_iw_fallback(interface: str) -> int | None:
     """Fallback query using iw or iwconfig when /proc/net/wireless is unavailable."""
     # 1. Try: iw dev <interface> link
-    try:
-        res = subprocess.run(
-            ["iw", "dev", interface, "link"],
-            capture_output=True,
-            text=True,
-            timeout=1,
-            check=False,
-        )
-        if res.returncode == 0 and res.stdout:
-            match = re.search(r"signal:\s*(-?\d+)\s*dBm", res.stdout)
-            if match:
-                return int(match.group(1))
-    except (FileNotFoundError, PermissionError, subprocess.SubprocessError):
-        pass
+    out = _run_cmd(["iw", "dev", interface, "link"])
+    if out:
+        match = re.search(r"signal:\s*(-?\d+)\s*dBm", out)
+        if match:
+            return int(match.group(1))
 
-    # 2. Try: iwconfig <interface>
-    try:
-        res = subprocess.run(
-            ["iwconfig", interface],
-            capture_output=True,
-            text=True,
-            timeout=1,
-            check=False,
-        )
-        if res.returncode == 0 and res.stdout:
-            match = re.search(r"Signal level[=:]\s*(-?\d+)\s*dBm", res.stdout)
-            if match:
-                return int(match.group(1))
-            # Some drivers output "Signal level=X/Y" or "Signal level=X"
-            match = re.search(r"Signal level[=:]\s*(-?\d+)", res.stdout)
-            if match:
-                val = int(match.group(1))
-                if val > 0:
-                    val = val - 256
-                return val
-    except (FileNotFoundError, PermissionError, subprocess.SubprocessError):
-        pass
+    # 2. Try: iwconfig <interface> (only accept explicit dBm, avoiding ratio formats like 45/100)
+    out = _run_cmd(["iwconfig", interface])
+    if out:
+        match = re.search(r"Signal level[=:]\s*(-?\d+)\s*dBm", out)
+        if match:
+            return int(match.group(1))
 
     return None
 
@@ -118,6 +126,7 @@ def get_wifi_signal_strength(interface: str | None = None) -> int:
                 if target_iface and target_iface in data:
                     return data[target_iface]
                 if not target_iface:
+                    # Prefer active wlan0 if present, else first active interface
                     if DEFAULT_WIFI_INTERFACE in data:
                         return data[DEFAULT_WIFI_INTERFACE]
                     return next(iter(data.values()))

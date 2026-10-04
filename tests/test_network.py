@@ -54,8 +54,20 @@ def test_parse_proc_net_wireless_multi_interface(monkeypatch):
     from network import parse_proc_net_wireless
 
     result = parse_proc_net_wireless(SAMPLE_PROC_WIRELESS_MULTI)
+    assert "eth_mesh" not in result
     assert result["wlan0"] == -62
     assert result["wlan1"] == -75
+
+
+def test_parse_proc_net_wireless_zero_level_ignored():
+    from network import parse_proc_net_wireless
+
+    zero_content = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
+ face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
+ wlan0: 0000   0.   0.    0          0      0      0      0      0        0
+"""
+    assert parse_proc_net_wireless(zero_content) == {}
+
 
 
 def test_parse_proc_net_wireless_empty_or_malformed():
@@ -170,6 +182,39 @@ def test_query_iw_fallback_tools_missing(monkeypatch):
 
     monkeypatch.setattr(network.subprocess, "run", fake_run)
     assert network._query_iw_fallback("wlan0") is None
+
+
+def test_auto_detection_picks_active_dongle_over_inactive_wlan0(monkeypatch):
+    import network
+
+    dongle_content = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
+ face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
+ wlan0: 0000   0.   0.    0          0      0      0      0      0        0
+ wlan1: 0000   50.  -65.  -256       0      0      0      0      0        0
+"""
+    monkeypatch.setenv("MOCK_MODE", "false")
+    monkeypatch.setattr(network.sys, "platform", "linux")
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: dongle_content)
+
+    # With no interface specified, should auto-detect the active wlan1
+    rssi = network.get_wifi_signal_strength()
+    assert rssi == -65
+
+
+def test_query_iw_fallback_iwconfig_ignores_ratio_without_dbm(monkeypatch):
+    import network
+    from subprocess import CompletedProcess
+
+    iwconfig_ratio_output = """wlan0     IEEE 802.11  ESSID:"TestWiFi"  
+          Link Quality=45/70  Signal level=45/100  
+"""
+
+    def fake_run(cmd, **kwargs):
+        return CompletedProcess(cmd, returncode=0, stdout=iwconfig_ratio_output, stderr="")
+
+    monkeypatch.setattr(network.subprocess, "run", fake_run)
+    assert network._query_iw_fallback("wlan0") is None
+
 
 
 
