@@ -116,11 +116,11 @@ def get_wifi_signal_strength() -> int:
             if content:
                 data = parse_proc_net_wireless(content)
                 if data:
-                    if configured_iface and configured_iface in data:
-                        return data[configured_iface]
-                    if not configured_iface and DEFAULT_WIFI_INTERFACE in data:
-                        return data[DEFAULT_WIFI_INTERFACE]
-                    return next(iter(data.values()))
+                    if configured_iface:
+                        if configured_iface in data:
+                            return data[configured_iface]
+                    else:
+                        return next(iter(data.values()))
         except (OSError, UnicodeDecodeError) as e:
             logger.debug("Failed to read %s: %s", PROC_NET_WIRELESS_PATH, e)
 

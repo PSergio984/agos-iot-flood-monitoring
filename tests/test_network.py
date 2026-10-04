@@ -31,6 +31,12 @@ def test_get_wifi_signal_strength_in_mock_mode(monkeypatch):
     assert rssi == -65
 
 
+def test_get_wifi_signal_strength_non_linux_platform(monkeypatch):
+    monkeypatch.setenv("MOCK_MODE", "false")
+    monkeypatch.setattr(network.sys, "platform", "win32")
+    assert get_wifi_signal_strength() == -65
+
+
 def test_parse_proc_net_wireless_standard():
     content = make_proc_content(" wlan0: 0000   52.  -58.  -256        0      0      0      0      0        0")
     assert parse_proc_net_wireless(content) == {"wlan0": -58}
@@ -69,14 +75,13 @@ def test_get_wifi_signal_strength_linux_procfs_success(linux_mode, monkeypatch):
     assert get_wifi_signal_strength() == -58
 
 
-def test_get_wifi_signal_strength_defaults_to_wlan0_when_multiple_active(linux_mode, monkeypatch):
+def test_auto_detection_picks_first_interface_in_procfs(linux_mode, monkeypatch):
     content = make_proc_content(
         " wlan1: 0000   50.  -65.  -256       0      0      0      0      0        0",
         " wlan0: 0000   40.  -78.  -256       0      0      0      0      0        0",
     )
     monkeypatch.setattr(network, "_read_proc_wireless", lambda: content)
-    # When no WIFI_INTERFACE is specified, default to wlan0
-    assert get_wifi_signal_strength() == -78
+    assert get_wifi_signal_strength() == -65
 
 
 def test_get_wifi_signal_strength_honors_wifi_interface_in_procfs(linux_mode, monkeypatch):
@@ -89,6 +94,16 @@ def test_get_wifi_signal_strength_honors_wifi_interface_in_procfs(linux_mode, mo
     assert get_wifi_signal_strength() == -65
 
 
+def test_get_wifi_signal_strength_configured_interface_not_in_procfs_falls_back_to_cli(linux_mode, monkeypatch):
+    content = make_proc_content(" wlan0: 0000   52.  -58.  -256        0      0      0      0      0        0")
+    monkeypatch.setenv("WIFI_INTERFACE", "wlan1")
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: content)
+    queried = []
+    monkeypatch.setattr(network, "_query_iw_fallback", lambda iface: queried.append(iface) or -73)
+    assert get_wifi_signal_strength() == -73
+    assert queried == ["wlan1"]
+
+
 def test_auto_detection_picks_active_dongle_when_wlan0_inactive(linux_mode, monkeypatch):
     content = make_proc_content(
         " wlan0: 0000   0.   0.    0          0      0      0      0      0        0",
@@ -96,6 +111,13 @@ def test_auto_detection_picks_active_dongle_when_wlan0_inactive(linux_mode, monk
     )
     monkeypatch.setattr(network, "_read_proc_wireless", lambda: content)
     assert get_wifi_signal_strength() == -65
+
+
+def test_get_wifi_signal_strength_disconnected_returns_negative_99(linux_mode, monkeypatch):
+    content = make_proc_content(" wlan0: 0000   0.   0.    0          0      0      0      0      0        0")
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: content)
+    monkeypatch.setattr(network, "_query_iw_fallback", lambda iface: None)
+    assert get_wifi_signal_strength() == -99
 
 
 def test_get_wifi_signal_strength_fallback_on_oserror(linux_mode, monkeypatch):
@@ -134,6 +156,15 @@ def test_get_wifi_signal_strength_uses_wifi_interface_env_for_fallback(linux_mod
     assert queried_ifaces == ["wlan_custom"]
 
 
+def _fake_command_runner(success_tool: str, stdout_text: str):
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == success_tool:
+            return CompletedProcess(cmd, returncode=0, stdout=stdout_text, stderr="")
+        return CompletedProcess(cmd, returncode=1, stdout="", stderr="")
+
+    return fake_run
+
+
 def test_query_iw_fallback_iw_tool(monkeypatch):
     iw_output = (
         "Connected to 00:11:22:33:44:55 (on wlan0)\n"
@@ -142,13 +173,7 @@ def test_query_iw_fallback_iw_tool(monkeypatch):
         "    signal: -63 dBm\n"
         "    tx bitrate: 72.2 MBit/s\n"
     )
-
-    def fake_run(cmd, **kwargs):
-        if cmd[0] == "iw":
-            return CompletedProcess(cmd, returncode=0, stdout=iw_output, stderr="")
-        return CompletedProcess(cmd, returncode=1, stdout="", stderr="")
-
-    monkeypatch.setattr(network.subprocess, "run", fake_run)
+    monkeypatch.setattr(network.subprocess, "run", _fake_command_runner("iw", iw_output))
     assert network._query_iw_fallback("wlan0") == -63
 
 
@@ -158,15 +183,7 @@ def test_query_iw_fallback_iwconfig_tool(monkeypatch):
         "          Mode:Managed  Frequency:2.437 GHz  Access Point: 00:11:22:33:44:55\n"
         "          Link Quality=55/70  Signal level=-67 dBm\n"
     )
-
-    def fake_run(cmd, **kwargs):
-        if cmd[0] == "iw":
-            return CompletedProcess(cmd, returncode=1, stdout="", stderr="")
-        if cmd[0] == "iwconfig":
-            return CompletedProcess(cmd, returncode=0, stdout=iwconfig_output, stderr="")
-        return CompletedProcess(cmd, returncode=1, stdout="", stderr="")
-
-    monkeypatch.setattr(network.subprocess, "run", fake_run)
+    monkeypatch.setattr(network.subprocess, "run", _fake_command_runner("iwconfig", iwconfig_output))
     assert network._query_iw_fallback("wlan0") == -67
 
 
@@ -183,9 +200,5 @@ def test_query_iw_fallback_iwconfig_ignores_ratio_without_dbm(monkeypatch):
         "wlan0     IEEE 802.11  ESSID:\"TestWiFi\"\n"
         "          Link Quality=45/70  Signal level=45/100\n"
     )
-
-    def fake_run(cmd, **kwargs):
-        return CompletedProcess(cmd, returncode=0, stdout=iwconfig_ratio_output, stderr="")
-
-    monkeypatch.setattr(network.subprocess, "run", fake_run)
+    monkeypatch.setattr(network.subprocess, "run", _fake_command_runner("iwconfig", iwconfig_ratio_output))
     assert network._query_iw_fallback("wlan0") is None
