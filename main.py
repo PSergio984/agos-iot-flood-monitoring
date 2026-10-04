@@ -57,6 +57,8 @@ from frame_quality import get_frame_quality_metrics, is_frame_usable, is_frame_d
 from sensor import get_water_level, update_risk_led, water_level_to_risk_score
 from uploader import upload_image
 from water_level_filter import WaterLevelFilter
+from network import get_wifi_signal_strength
+
 
 try:
     import websocket as _websocket
@@ -584,7 +586,7 @@ def sensor_loop():
                             payload = {
                                 "sensor_device_id": SENSOR_DEVICE_ID,
                                 "raw_distance_cm": round(level, 2),
-                                "signal_strength": 100,
+                                "signal_strength": get_wifi_signal_strength(),
                                 "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                             }
                             response = _http_session.post(SERVER_URL, json=payload, headers=headers, timeout=5)
