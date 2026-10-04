@@ -25,8 +25,7 @@ def _normalize_rssi(raw_level: float) -> int | None:
     if raw_level > 0.0:
         raw_level = raw_level - 256.0
     rssi = int(round(raw_level))
-    # Valid Wi-Fi RSSI in dBm is negative (typically -20 to -100 dBm)
-    if rssi >= 0 or rssi < -120:
+    if rssi >= 0:
         return None
     return rssi
 
@@ -99,28 +98,39 @@ def get_wifi_signal_strength() -> int:
     """Return the Wi-Fi RSSI in dBm (e.g. -65).
 
     In MOCK_MODE or on non-Linux platforms, returns realistic mock RSSI (-65 dBm).
-    On Linux, extracts the first active interface from /proc/net/wireless.
-    If unpopulated or unreadable, falls back to wlan0 or the WIFI_INTERFACE env var
-    via iw/iwconfig tools.
+    On Linux, reads the active interface from /proc/net/wireless:
+    - If WIFI_INTERFACE is configured and active in procfs, uses it.
+    - Otherwise defaults to wlan0 if active, or the first active interface found.
+    If unpopulated or unreadable, falls back to querying iw/iwconfig for the
+    configured interface or wlan0.
     If measurement fails or interface is disconnected, safely returns -99 dBm.
     """
     if _is_mock_mode():
         return MOCK_WIFI_RSSI
 
     try:
-        content = _read_proc_wireless()
-        if content:
-            data = parse_proc_net_wireless(content)
-            if data:
-                # Extract the first active wireless interface from procfs
-                return next(iter(data.values()))
-    except (OSError, UnicodeDecodeError) as e:
-        logger.debug("Failed to read %s: %s", PROC_NET_WIRELESS_PATH, e)
+        configured_iface = os.getenv("WIFI_INTERFACE", "").strip()
 
-    # Fall back to configured WIFI_INTERFACE or DEFAULT_WIFI_INTERFACE (wlan0)
-    fallback_iface = os.getenv("WIFI_INTERFACE", "").strip() or DEFAULT_WIFI_INTERFACE
-    fallback_rssi = _query_iw_fallback(fallback_iface)
-    if fallback_rssi is not None:
-        return fallback_rssi
+        try:
+            content = _read_proc_wireless()
+            if content:
+                data = parse_proc_net_wireless(content)
+                if data:
+                    if configured_iface and configured_iface in data:
+                        return data[configured_iface]
+                    if not configured_iface and DEFAULT_WIFI_INTERFACE in data:
+                        return data[DEFAULT_WIFI_INTERFACE]
+                    return next(iter(data.values()))
+        except (OSError, UnicodeDecodeError) as e:
+            logger.debug("Failed to read %s: %s", PROC_NET_WIRELESS_PATH, e)
+
+        # Fall back to configured WIFI_INTERFACE or DEFAULT_WIFI_INTERFACE (wlan0)
+        fallback_iface = configured_iface or DEFAULT_WIFI_INTERFACE
+        fallback_rssi = _query_iw_fallback(fallback_iface)
+        if fallback_rssi is not None:
+            return fallback_rssi
+
+    except Exception as e:
+        logger.debug("Unexpected error measuring Wi-Fi signal: %s", e)
 
     return FALLBACK_WIFI_RSSI
