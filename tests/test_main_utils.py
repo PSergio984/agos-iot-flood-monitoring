@@ -552,6 +552,45 @@ def test_close_ws_client():
     assert client._stop_reader.is_set()
 
 
+def test_sensor_loop_posts_measured_wifi_signal_strength(monkeypatch):
+    from unittest.mock import MagicMock
+
+    posted_payloads = []
+    main.stop_event.clear()
+
+    monkeypatch.setattr(main, "get_water_level", lambda: 35.0)
+    monkeypatch.setattr(main.water_level_filter, "process", lambda lvl: (lvl, "accepted"))
+    monkeypatch.setattr(main, "get_wifi_signal_strength", lambda: -58)
+    monkeypatch.setattr(main, "SENSOR_POST_ENABLED", True)
+    monkeypatch.setattr(main, "SENSOR_INTERVAL", 0.01)
+
+    class DummyResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        posted_payloads.append(json)
+        main.stop_event.set()
+        return DummyResponse()
+
+    monkeypatch.setattr(main._http_session, "post", fake_post)
+
+    try:
+        main.sensor_loop()
+    finally:
+        main.stop_event.set()
+
+    assert len(posted_payloads) == 1
+    assert posted_payloads[0]["raw_distance_cm"] == 35.0
+    assert posted_payloads[0]["signal_strength"] == -58
+
+
+
+
+
+
 
 
 
