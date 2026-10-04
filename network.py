@@ -100,7 +100,7 @@ def get_wifi_signal_strength() -> int:
     In MOCK_MODE or on non-Linux platforms, returns realistic mock RSSI (-65 dBm).
     On Linux, reads the active interface from /proc/net/wireless:
     - If WIFI_INTERFACE is configured and active in procfs, uses it.
-    - Otherwise defaults to wlan0 if active, or the first active interface found.
+    - Otherwise auto-detects the first active wireless interface found.
     If unpopulated or unreadable, falls back to querying iw/iwconfig for the
     configured interface or wlan0.
     If measurement fails or interface is disconnected, safely returns -99 dBm.
