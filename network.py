@@ -8,20 +8,13 @@ logger = logging.getLogger(__name__)
 
 PROC_NET_WIRELESS_PATH = "/proc/net/wireless"
 DEFAULT_WIFI_INTERFACE = "wlan0"
-MOCK_WIFI_RSSI_DEFAULT = -65
+MOCK_WIFI_RSSI = -65
 FALLBACK_WIFI_RSSI = -99
 
 
 def _is_mock_mode() -> bool:
     mock_env = os.getenv("MOCK_MODE", "false").strip().lower() in ("true", "1", "yes")
     return mock_env or sys.platform != "linux"
-
-
-def _get_mock_wifi_signal_strength() -> int:
-    try:
-        return int(os.getenv("MOCK_WIFI_RSSI", str(MOCK_WIFI_RSSI_DEFAULT)))
-    except (ValueError, TypeError):
-        return MOCK_WIFI_RSSI_DEFAULT
 
 
 def _normalize_rssi(raw_level: float) -> int | None:
@@ -89,52 +82,43 @@ def _run_cmd(cmd: list[str]) -> str | None:
 
 def _query_iw_fallback(interface: str) -> int | None:
     """Fallback query using iw or iwconfig when /proc/net/wireless is unavailable."""
-    # 1. Try: iw dev <interface> link
-    out = _run_cmd(["iw", "dev", interface, "link"])
-    if out:
-        match = re.search(r"signal:\s*(-?\d+)\s*dBm", out)
-        if match:
-            return int(match.group(1))
-
-    # 2. Try: iwconfig <interface> (only accept explicit dBm, avoiding ratio formats like 45/100)
-    out = _run_cmd(["iwconfig", interface])
-    if out:
-        match = re.search(r"Signal level[=:]\s*(-?\d+)\s*dBm", out)
-        if match:
-            return int(match.group(1))
-
+    attempts = [
+        (["iw", "dev", interface, "link"], r"signal:\s*(-?\d+)\s*dBm"),
+        (["iwconfig", interface], r"Signal level[=:]\s*(-?\d+)\s*dBm"),
+    ]
+    for cmd, pattern in attempts:
+        out = _run_cmd(cmd)
+        if out:
+            match = re.search(pattern, out)
+            if match:
+                return int(match.group(1))
     return None
 
 
-def get_wifi_signal_strength(interface: str | None = None) -> int:
+def get_wifi_signal_strength() -> int:
     """Return the Wi-Fi RSSI in dBm (e.g. -65).
 
-    In MOCK_MODE or on non-Linux platforms, returns a mock RSSI (default -65 dBm).
-    On Linux, reads from /proc/net/wireless or fallback tools.
+    In MOCK_MODE or on non-Linux platforms, returns realistic mock RSSI (-65 dBm).
+    On Linux, extracts the first active interface from /proc/net/wireless.
+    If unpopulated or unreadable, falls back to wlan0 or the WIFI_INTERFACE env var
+    via iw/iwconfig tools.
     If measurement fails or interface is disconnected, safely returns -99 dBm.
     """
     if _is_mock_mode():
-        return _get_mock_wifi_signal_strength()
-
-    target_iface = (interface or os.getenv("WIFI_INTERFACE", "")).strip()
+        return MOCK_WIFI_RSSI
 
     try:
         content = _read_proc_wireless()
         if content:
             data = parse_proc_net_wireless(content)
             if data:
-                if target_iface and target_iface in data:
-                    return data[target_iface]
-                if not target_iface:
-                    # Prefer active wlan0 if present, else first active interface
-                    if DEFAULT_WIFI_INTERFACE in data:
-                        return data[DEFAULT_WIFI_INTERFACE]
-                    return next(iter(data.values()))
+                # Extract the first active wireless interface from procfs
+                return next(iter(data.values()))
     except (OSError, UnicodeDecodeError) as e:
         logger.debug("Failed to read %s: %s", PROC_NET_WIRELESS_PATH, e)
 
-    # Attempt fallback using iw/iwconfig if procfs read did not yield a value
-    fallback_iface = target_iface or DEFAULT_WIFI_INTERFACE
+    # Fall back to configured WIFI_INTERFACE or DEFAULT_WIFI_INTERFACE (wlan0)
+    fallback_iface = os.getenv("WIFI_INTERFACE", "").strip() or DEFAULT_WIFI_INTERFACE
     fallback_rssi = _query_iw_fallback(fallback_iface)
     if fallback_rssi is not None:
         return fallback_rssi

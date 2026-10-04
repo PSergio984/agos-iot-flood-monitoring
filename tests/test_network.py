@@ -1,7 +1,15 @@
 import os
 import pytest
 
-from network import get_wifi_signal_strength
+import network
+from network import get_wifi_signal_strength, parse_proc_net_wireless
+
+
+@pytest.fixture
+def linux_mode(monkeypatch):
+    """Fixture to simulate a Linux environment with mock mode disabled."""
+    monkeypatch.setenv("MOCK_MODE", "false")
+    monkeypatch.setattr(network.sys, "platform", "linux")
 
 
 def test_get_wifi_signal_strength_in_mock_mode(monkeypatch):
@@ -9,13 +17,6 @@ def test_get_wifi_signal_strength_in_mock_mode(monkeypatch):
     rssi = get_wifi_signal_strength()
     assert isinstance(rssi, int)
     assert rssi == -65
-
-
-def test_get_wifi_signal_strength_custom_mock_rssi(monkeypatch):
-    monkeypatch.setenv("MOCK_MODE", "true")
-    monkeypatch.setenv("MOCK_WIFI_RSSI", "-55")
-    rssi = get_wifi_signal_strength()
-    assert rssi == -55
 
 
 SAMPLE_PROC_WIRELESS = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
@@ -36,23 +37,17 @@ SAMPLE_PROC_WIRELESS_MULTI = """Inter-| sta-|   Quality        |   Discarded pac
 """
 
 
-def test_parse_proc_net_wireless_standard(monkeypatch):
-    from network import parse_proc_net_wireless
-
+def test_parse_proc_net_wireless_standard():
     result = parse_proc_net_wireless(SAMPLE_PROC_WIRELESS)
     assert result == {"wlan0": -58}
 
 
-def test_parse_proc_net_wireless_unsigned_offset(monkeypatch):
-    from network import parse_proc_net_wireless
-
+def test_parse_proc_net_wireless_unsigned_offset():
     result = parse_proc_net_wireless(SAMPLE_PROC_WIRELESS_UNSIGNED)
     assert result == {"wlan0": -58}
 
 
-def test_parse_proc_net_wireless_multi_interface(monkeypatch):
-    from network import parse_proc_net_wireless
-
+def test_parse_proc_net_wireless_multi_interface():
     result = parse_proc_net_wireless(SAMPLE_PROC_WIRELESS_MULTI)
     assert "eth_mesh" not in result
     assert result["wlan0"] == -62
@@ -60,8 +55,6 @@ def test_parse_proc_net_wireless_multi_interface(monkeypatch):
 
 
 def test_parse_proc_net_wireless_zero_level_ignored():
-    from network import parse_proc_net_wireless
-
     zero_content = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
  face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
  wlan0: 0000   0.   0.    0          0      0      0      0      0        0
@@ -69,73 +62,64 @@ def test_parse_proc_net_wireless_zero_level_ignored():
     assert parse_proc_net_wireless(zero_content) == {}
 
 
-
 def test_parse_proc_net_wireless_empty_or_malformed():
-    from network import parse_proc_net_wireless
-
     assert parse_proc_net_wireless("") == {}
     assert parse_proc_net_wireless("Invalid header\nAnother line") == {}
 
 
-def test_get_wifi_signal_strength_linux_procfs_success(monkeypatch):
-    import network
-
-    monkeypatch.setenv("MOCK_MODE", "false")
-    monkeypatch.setattr(network.sys, "platform", "linux")
-    monkeypatch.setattr(
-        network,
-        "_read_proc_wireless",
-        lambda: SAMPLE_PROC_WIRELESS,
-    )
-
-    rssi = network.get_wifi_signal_strength()
+def test_get_wifi_signal_strength_linux_procfs_success(linux_mode, monkeypatch):
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: SAMPLE_PROC_WIRELESS)
+    rssi = get_wifi_signal_strength()
     assert rssi == -58
 
 
-def test_get_wifi_signal_strength_specific_interface(monkeypatch):
-    import network
-
-    monkeypatch.setenv("MOCK_MODE", "false")
-    monkeypatch.setattr(network.sys, "platform", "linux")
-    monkeypatch.setattr(
-        network,
-        "_read_proc_wireless",
-        lambda: SAMPLE_PROC_WIRELESS_MULTI,
-    )
-
-    assert network.get_wifi_signal_strength(interface="wlan1") == -75
-
-
-def test_get_wifi_signal_strength_fallback_on_oserror(monkeypatch):
-    import network
-
-    monkeypatch.setenv("MOCK_MODE", "false")
-    monkeypatch.setattr(network.sys, "platform", "linux")
-
+def test_get_wifi_signal_strength_fallback_on_oserror(linux_mode, monkeypatch):
     def _failing_read():
         raise OSError("Permission denied or missing file")
 
     monkeypatch.setattr(network, "_read_proc_wireless", _failing_read)
     monkeypatch.setattr(network, "_query_iw_fallback", lambda iface: None)
 
-    rssi = network.get_wifi_signal_strength()
+    rssi = get_wifi_signal_strength()
     assert rssi == -99
 
 
-def test_get_wifi_signal_strength_subprocess_fallback(monkeypatch):
-    import network
-
-    monkeypatch.setenv("MOCK_MODE", "false")
-    monkeypatch.setattr(network.sys, "platform", "linux")
+def test_get_wifi_signal_strength_subprocess_fallback(linux_mode, monkeypatch):
     monkeypatch.setattr(network, "_read_proc_wireless", lambda: "")
     monkeypatch.setattr(network, "_query_iw_fallback", lambda iface: -72)
 
-    rssi = network.get_wifi_signal_strength()
+    rssi = get_wifi_signal_strength()
     assert rssi == -72
 
 
+def test_get_wifi_signal_strength_uses_wifi_interface_env_for_fallback(linux_mode, monkeypatch):
+    queried_ifaces = []
+    monkeypatch.setenv("WIFI_INTERFACE", "wlan_custom")
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: "")
+    monkeypatch.setattr(
+        network,
+        "_query_iw_fallback",
+        lambda iface: queried_ifaces.append(iface) or -70,
+    )
+
+    rssi = get_wifi_signal_strength()
+    assert rssi == -70
+    assert queried_ifaces == ["wlan_custom"]
+
+
+def test_auto_detection_picks_first_active_interface(linux_mode, monkeypatch):
+    dongle_first_content = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
+ face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
+ wlan1: 0000   50.  -65.  -256       0      0      0      0      0        0
+ wlan0: 0000   40.  -78.  -256       0      0      0      0      0        0
+"""
+    monkeypatch.setattr(network, "_read_proc_wireless", lambda: dongle_first_content)
+
+    rssi = get_wifi_signal_strength()
+    assert rssi == -65
+
+
 def test_query_iw_fallback_iw_tool(monkeypatch):
-    import network
     from subprocess import CompletedProcess
 
     iw_output = """Connected to 00:11:22:33:44:55 (on wlan0)
@@ -155,7 +139,6 @@ def test_query_iw_fallback_iw_tool(monkeypatch):
 
 
 def test_query_iw_fallback_iwconfig_tool(monkeypatch):
-    import network
     from subprocess import CompletedProcess
 
     iwconfig_output = """wlan0     IEEE 802.11  ESSID:"TestWiFi"  
@@ -175,8 +158,6 @@ def test_query_iw_fallback_iwconfig_tool(monkeypatch):
 
 
 def test_query_iw_fallback_tools_missing(monkeypatch):
-    import network
-
     def fake_run(cmd, **kwargs):
         raise FileNotFoundError("command not found")
 
@@ -184,25 +165,7 @@ def test_query_iw_fallback_tools_missing(monkeypatch):
     assert network._query_iw_fallback("wlan0") is None
 
 
-def test_auto_detection_picks_active_dongle_over_inactive_wlan0(monkeypatch):
-    import network
-
-    dongle_content = """Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE
- face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22
- wlan0: 0000   0.   0.    0          0      0      0      0      0        0
- wlan1: 0000   50.  -65.  -256       0      0      0      0      0        0
-"""
-    monkeypatch.setenv("MOCK_MODE", "false")
-    monkeypatch.setattr(network.sys, "platform", "linux")
-    monkeypatch.setattr(network, "_read_proc_wireless", lambda: dongle_content)
-
-    # With no interface specified, should auto-detect the active wlan1
-    rssi = network.get_wifi_signal_strength()
-    assert rssi == -65
-
-
 def test_query_iw_fallback_iwconfig_ignores_ratio_without_dbm(monkeypatch):
-    import network
     from subprocess import CompletedProcess
 
     iwconfig_ratio_output = """wlan0     IEEE 802.11  ESSID:"TestWiFi"  
@@ -214,7 +177,3 @@ def test_query_iw_fallback_iwconfig_ignores_ratio_without_dbm(monkeypatch):
 
     monkeypatch.setattr(network.subprocess, "run", fake_run)
     assert network._query_iw_fallback("wlan0") is None
-
-
-
-
